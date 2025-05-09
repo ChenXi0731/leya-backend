@@ -1,11 +1,10 @@
 import { injectSpeedInsights } from '@vercel/speed-insights';
+import express from 'express';
+import cors from 'cors'; // 引入 cors 中間件
+import { Client } from 'pg'; // 引入 pg 客戶端
 
-const express = require('express');
-const cors = require('cors'); // 引入 cors 中間件
-const { Client } = require('pg'); // 引入 pg 客戶端
 const app = express();
 const PORT = process.env.PORT || 3000;
-
 
 injectSpeedInsights();
 
