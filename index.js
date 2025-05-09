@@ -33,18 +33,18 @@ const users = [
     { username: 'admin1', password: 'password1' }
 ];
 
-// 路由範例
-app.get('/', (req, res) => {
-    res.send('Hello World!');
-});
+// // 路由範例
+// app.get('/', (req, res) => {
+//     res.send('Hello World!');
+// });
 
-// 新增的測試路由
-app.get('/hello', (req, res) => {
-    res.send('Hello world');
-});
+// // 新增的測試路由
+// app.get('/hello', (req, res) => {
+//     res.send('Hello world');
+// });
 
 // 登入路由
-app.post('/api/login', async (req, res) => {
+app.post('/', async (req, res) => {
     const { usernameOrEmail, password } = req.body;
     console.log(`Received login request for: ${usernameOrEmail}`);
 
