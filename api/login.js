@@ -11,27 +11,31 @@ const client = new Client({
 
 client.connect();
 
-export default async (req, res) => {
-    if (req.method === 'POST') {
-        const { usernameOrEmail, password } = req.body;
-        try {
-            const result = await client.query(
-                'SELECT username, nickname, password_hash FROM "users" WHERE username = $1 OR email = $2',
-                [usernameOrEmail, usernameOrEmail]
-            );
-            const user = result.rows[0];
+export async function POST(req) {
+    const { usernameOrEmail, password } = await req.json(); // 解析請求的 JSON 主體
+    try {
+        const result = await client.query(
+            'SELECT username, nickname, password_hash FROM "users" WHERE username = $1 OR email = $2',
+            [usernameOrEmail, usernameOrEmail]
+        );
+        const user = result.rows[0];
 
-            if (user && user.password_hash === password) {
-                return res.json({ message: '登入成功', nickname: user.nickname, id: user.username });
-            } else {
-                return res.status(401).json({ message: '帳號或密碼錯誤' });
-            }
-        } catch (err) {
-            console.error('Query error', err.stack);
-            return res.status(500).json({ message: '伺服器錯誤' });
+        if (user && user.password_hash === password) {
+            return new Response(JSON.stringify({ message: '登入成功', nickname: user.nickname, id: user.username }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' }
+            });
+        } else {
+            return new Response(JSON.stringify({ message: '帳號或密碼錯誤' }), {
+                status: 401,
+                headers: { 'Content-Type': 'application/json' }
+            });
         }
-    } else {
-        res.setHeader('Allow', ['POST']);
-        res.status(405).end(`Method ${req.method} Not Allowed`);
+    } catch (err) {
+        console.error('Query error', err.stack);
+        return new Response(JSON.stringify({ message: '伺服器錯誤' }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' }
+        });
     }
-};
+}
