@@ -1,9 +1,13 @@
-import { SpeedInsights } from "@vercel/speed-insights/next"
+import { injectSpeedInsights } from '@vercel/speed-insights';
+
 const express = require('express');
 const cors = require('cors'); // 引入 cors 中間件
 const { Client } = require('pg'); // 引入 pg 客戶端
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+
+injectSpeedInsights();
 
 // 中間件
 app.use(cors()); // 允許跨域請求
