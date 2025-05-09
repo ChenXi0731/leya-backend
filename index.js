@@ -1,3 +1,4 @@
+import { SpeedInsights } from "@vercel/speed-insights/next"
 const express = require('express');
 const cors = require('cors'); // 引入 cors 中間件
 const { Client } = require('pg'); // 引入 pg 客戶端
