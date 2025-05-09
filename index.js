@@ -55,6 +55,8 @@ app.post('/', async (req, res) => {
         );
         const user = result.rows[0];
 
+        console.log('Query result:', user); // 添加這行來檢查查詢結果
+
         // 檢查用戶是否存在且密碼正確
         if (user && user.password_hash === password) {
             return res.json({ message: '登入成功', nickname: user.nickname, id: user.username });
