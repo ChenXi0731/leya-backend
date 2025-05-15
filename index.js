@@ -43,6 +43,10 @@ const users = [
 // });
 
 // 登入路由
+app.get('/', (req, res) => {
+    res.send('Hello World!')
+  })
+
 app.post('/login', async (req, res) => {
     const { usernameOrEmail, password } = req.body;
     console.log(`Received login request for: ${usernameOrEmail}`);
