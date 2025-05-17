@@ -136,7 +136,8 @@ app.get('/posts', async (req, res) => {
         const result = await client.query(`
             SELECT 
                 posts.*, 
-                users.nickname 
+                users.nickname, 
+                users.username
             FROM posts 
             LEFT JOIN users ON posts.user_id = users.id
             ORDER BY posts.created_at DESC
