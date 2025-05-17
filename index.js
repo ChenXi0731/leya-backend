@@ -137,7 +137,13 @@ app.get('/posts', async (req, res) => {
             SELECT 
                 posts.*, 
                 users.nickname, 
-                users.username
+                users.username,
+                COALESCE(
+                    ARRAY(
+                        SELECT image_url FROM post_images WHERE post_id = posts.id
+                    ), 
+                    ARRAY[]::text[]
+                ) AS images
             FROM posts 
             LEFT JOIN users ON posts.user_id = users.id
             ORDER BY posts.created_at DESC
@@ -149,41 +155,70 @@ app.get('/posts', async (req, res) => {
     }
 });
 
-// 新增貼文（僅限管理員）
+// 新增貼文（僅限管理員，支援多張圖片）
 app.post('/posts', async (req, res) => {
-    const { user_id, content, image_url } = req.body;
+    const { user_id, content, images } = req.body;
     if (user_id !== 999) {
         return res.status(403).json({ message: '只有管理員可以新增贊助貼文' });
     }
+    const clientConn = await client.connect ? await client.connect() : client;
     try {
-        const result = await client.query(
-            'INSERT INTO posts (user_id, content, image_url, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW()) RETURNING *',
-            [user_id, content, image_url]
+        await clientConn.query('BEGIN');
+        const postResult = await clientConn.query(
+            'INSERT INTO posts (user_id, content, created_at, updated_at) VALUES ($1, $2, NOW(), NOW()) RETURNING *',
+            [user_id, content]
         );
-        res.status(201).json(result.rows[0]);
+        const post = postResult.rows[0];
+        if (Array.isArray(images) && images.length > 0) {
+            for (const url of images.slice(0, 5)) {
+                await clientConn.query(
+                    'INSERT INTO post_images (post_id, image_url) VALUES ($1, $2)',
+                    [post.id, url]
+                );
+            }
+        }
+        await clientConn.query('COMMIT');
+        res.status(201).json(post);
     } catch (err) {
+        await clientConn.query('ROLLBACK');
         console.error('Create post error', err.stack);
         res.status(500).json({ message: '伺服器錯誤' });
     }
 });
 
-// 修改貼文（僅限管理員）
+// 修改貼文（僅限管理員，支援多張圖片）
 app.put('/posts/:id', async (req, res) => {
-    const { user_id, content, image_url } = req.body;
+    const { user_id, content, images } = req.body;
     const { id } = req.params;
     if (user_id !== 999) {
         return res.status(403).json({ message: '只有管理員可以修改贊助貼文' });
     }
+    const clientConn = await client.connect ? await client.connect() : client;
     try {
-        const result = await client.query(
-            'UPDATE posts SET content=$1, image_url=$2, updated_at=NOW() WHERE id=$3 AND user_id=999 RETURNING *',
-            [content, image_url, id]
+        await clientConn.query('BEGIN');
+        const result = await clientConn.query(
+            'UPDATE posts SET content=$1, updated_at=NOW() WHERE id=$2 AND user_id=999 RETURNING *',
+            [content, id]
         );
         if (result.rows.length === 0) {
+            await clientConn.query('ROLLBACK');
             return res.status(404).json({ message: '找不到該贊助貼文' });
         }
+        // 刪除舊圖片
+        await clientConn.query('DELETE FROM post_images WHERE post_id=$1', [id]);
+        // 新增新圖片
+        if (Array.isArray(images) && images.length > 0) {
+            for (const url of images.slice(0, 5)) {
+                await clientConn.query(
+                    'INSERT INTO post_images (post_id, image_url) VALUES ($1, $2)',
+                    [id, url]
+                );
+            }
+        }
+        await clientConn.query('COMMIT');
         res.json(result.rows[0]);
     } catch (err) {
+        await clientConn.query('ROLLBACK');
         console.error('Update post error', err.stack);
         res.status(500).json({ message: '伺服器錯誤' });
     }
