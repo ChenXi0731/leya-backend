@@ -161,7 +161,7 @@ app.post('/posts', async (req, res) => {
     if (user_id !== 999) {
         return res.status(403).json({ message: '只有管理員可以新增贊助貼文' });
     }
-    const clientConn = await client.connect ? await client.connect() : client;
+    const clientConn = client;
     try {
         await clientConn.query('BEGIN');
         const postResult = await clientConn.query(
@@ -193,7 +193,7 @@ app.put('/posts/:id', async (req, res) => {
     if (user_id !== 999) {
         return res.status(403).json({ message: '只有管理員可以修改贊助貼文' });
     }
-    const clientConn = await client.connect ? await client.connect() : client;
+    const clientConn = client;
     try {
         await clientConn.query('BEGIN');
         const result = await clientConn.query(
