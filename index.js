@@ -130,10 +130,17 @@ app.post('/login', async (req, res) => {
     }
 });
 
-// 取得所有貼文
+// 取得所有貼文（包含用戶暱稱）
 app.get('/posts', async (req, res) => {
     try {
-        const result = await client.query('SELECT * FROM posts ORDER BY created_at DESC');
+        const result = await client.query(`
+            SELECT 
+                posts.*, 
+                users.nickname 
+            FROM posts 
+            LEFT JOIN users ON posts.user_id = users.username::int
+            ORDER BY posts.created_at DESC
+        `);
         res.json(result.rows);
     } catch (err) {
         console.error('Fetch posts error', err.stack);
