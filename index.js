@@ -130,6 +130,79 @@ app.post('/login', async (req, res) => {
     }
 });
 
+// 取得所有貼文
+app.get('/posts', async (req, res) => {
+    try {
+        const result = await client.query('SELECT * FROM posts ORDER BY created_at DESC');
+        res.json(result.rows);
+    } catch (err) {
+        console.error('Fetch posts error', err.stack);
+        res.status(500).json({ message: '伺服器錯誤' });
+    }
+});
+
+// 新增貼文（僅限管理員）
+app.post('/posts', async (req, res) => {
+    const { user_id, content, image_url } = req.body;
+    if (user_id !== 999) {
+        return res.status(403).json({ message: '只有管理員可以新增贊助貼文' });
+    }
+    try {
+        const result = await client.query(
+            'INSERT INTO posts (user_id, content, image_url, created_at, updated_at) VALUES ($1, $2, $3, NOW(), NOW()) RETURNING *',
+            [user_id, content, image_url]
+        );
+        res.status(201).json(result.rows[0]);
+    } catch (err) {
+        console.error('Create post error', err.stack);
+        res.status(500).json({ message: '伺服器錯誤' });
+    }
+});
+
+// 修改貼文（僅限管理員）
+app.put('/posts/:id', async (req, res) => {
+    const { user_id, content, image_url } = req.body;
+    const { id } = req.params;
+    if (user_id !== 999) {
+        return res.status(403).json({ message: '只有管理員可以修改贊助貼文' });
+    }
+    try {
+        const result = await client.query(
+            'UPDATE posts SET content=$1, image_url=$2, updated_at=NOW() WHERE id=$3 AND user_id=999 RETURNING *',
+            [content, image_url, id]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: '找不到該贊助貼文' });
+        }
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error('Update post error', err.stack);
+        res.status(500).json({ message: '伺服器錯誤' });
+    }
+});
+
+// 刪除貼文（僅限管理員）
+app.delete('/posts/:id', async (req, res) => {
+    const { user_id } = req.body;
+    const { id } = req.params;
+    if (user_id !== 999) {
+        return res.status(403).json({ message: '只有管理員可以刪除贊助貼文' });
+    }
+    try {
+        const result = await client.query(
+            'DELETE FROM posts WHERE id=$1 AND user_id=999 RETURNING *',
+            [id]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ message: '找不到該贊助貼文' });
+        }
+        res.json({ message: '刪除成功' });
+    } catch (err) {
+        console.error('Delete post error', err.stack);
+        res.status(500).json({ message: '伺服器錯誤' });
+    }
+});
+
 // 啟動伺服器
 app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
