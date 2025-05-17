@@ -138,7 +138,7 @@ app.get('/posts', async (req, res) => {
                 posts.*, 
                 users.nickname 
             FROM posts 
-            LEFT JOIN users ON posts.user_id = users.username::int
+            LEFT JOIN users ON posts.user_id = users.id
             ORDER BY posts.created_at DESC
         `);
         res.json(result.rows);
