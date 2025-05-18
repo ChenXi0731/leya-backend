@@ -155,9 +155,9 @@ app.get('/posts', async (req, res) => {
     }
 });
 
-// 新增貼文（僅限管理員，支援多張圖片及贊助商資訊）
+// 新增貼文（僅限管理員，支援多張圖片）
 app.post('/posts', async (req, res) => {
-    const { user_id, content, images, donate_name, donate_url, donate_engname } = req.body;
+    const { user_id, content, images } = req.body;
     if (user_id !== 999) {
         return res.status(403).json({ message: '只有管理員可以新增贊助貼文' });
     }
@@ -165,8 +165,8 @@ app.post('/posts', async (req, res) => {
     try {
         await clientConn.query('BEGIN');
         const postResult = await clientConn.query(
-            'INSERT INTO posts (user_id, content, created_at, updated_at, donate_name, donate_url, donate_engname) VALUES ($1, $2, NOW(), NOW(), $3, $4, $5) RETURNING *',
-            [user_id, content, donate_name, donate_url, donate_engname]
+            'INSERT INTO posts (user_id, content, created_at, updated_at) VALUES ($1, $2, NOW(), NOW()) RETURNING *',
+            [user_id, content]
         );
         const post = postResult.rows[0];
         if (Array.isArray(images) && images.length > 0) {
@@ -186,9 +186,9 @@ app.post('/posts', async (req, res) => {
     }
 });
 
-// 修改貼文（僅限管理員，支援多張圖片及贊助商資訊）
+// 修改貼文（僅限管理員，支援多張圖片）
 app.put('/posts/:id', async (req, res) => {
-    const { user_id, content, images, donate_name, donate_url, donate_engname } = req.body;
+    const { user_id, content, images } = req.body;
     const { id } = req.params;
     if (user_id !== 999) {
         return res.status(403).json({ message: '只有管理員可以修改贊助貼文' });
@@ -197,8 +197,8 @@ app.put('/posts/:id', async (req, res) => {
     try {
         await clientConn.query('BEGIN');
         const result = await clientConn.query(
-            'UPDATE posts SET content=$1, updated_at=NOW(), donate_name=$3, donate_url=$4, donate_engname=$5 WHERE id=$2 AND user_id=999 RETURNING *',
-            [content, id, donate_name, donate_url, donate_engname]
+            'UPDATE posts SET content=$1, updated_at=NOW() WHERE id=$2 AND user_id=999 RETURNING *',
+            [content, id]
         );
         if (result.rows.length === 0) {
             await clientConn.query('ROLLBACK');
