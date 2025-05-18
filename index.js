@@ -91,12 +91,12 @@ app.post('/register', async (req, res) => {
 
         console.log('User created successfully:', result.rows[0]);
 
-        return res.status(201).json({ 
-            message: '註冊成功', 
-            user: { 
-                username: result.rows[0].username, 
-                nickname: result.rows[0].nickname 
-            } 
+        return res.status(201).json({
+            message: '註冊成功',
+            user: {
+                username: result.rows[0].username,
+                nickname: result.rows[0].nickname
+            }
         });
     } catch (err) {
         console.error('Registration error', err.stack);
@@ -134,17 +134,17 @@ app.post('/login', async (req, res) => {
 app.get('/posts', async (req, res) => {
     try {
         const result = await client.query(`
-            SELECT 
-                posts.*, 
-                users.nickname, 
+            SELECT
+                posts.*,
+                users.nickname,
                 users.username,
                 COALESCE(
                     ARRAY(
                         SELECT image_url FROM post_images WHERE post_id = posts.id
-                    ), 
+                    ),
                     ARRAY[]::text[]
                 ) AS images
-            FROM posts 
+            FROM posts
             LEFT JOIN users ON posts.user_id = users.id
             ORDER BY posts.created_at DESC
         `);
@@ -155,9 +155,9 @@ app.get('/posts', async (req, res) => {
     }
 });
 
-// 新增貼文（僅限管理員，支援多張圖片）
+// 新增貼文（僅限管理員，支援多張圖片和贊助商資訊）
 app.post('/posts', async (req, res) => {
-    const { user_id, content, images } = req.body;
+    const { user_id, content, images, donate_name, donate_url, donate_engname } = req.body;
     if (user_id !== 999) {
         return res.status(403).json({ message: '只有管理員可以新增贊助貼文' });
     }
@@ -165,8 +165,8 @@ app.post('/posts', async (req, res) => {
     try {
         await clientConn.query('BEGIN');
         const postResult = await clientConn.query(
-            'INSERT INTO posts (user_id, content, created_at, updated_at) VALUES ($1, $2, NOW(), NOW()) RETURNING *',
-            [user_id, content]
+            'INSERT INTO posts (user_id, content, donate_name, donate_url, donate_engname, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, NOW(), NOW()) RETURNING *',
+            [user_id, content, donate_name, donate_url, donate_engname]
         );
         const post = postResult.rows[0];
         if (Array.isArray(images) && images.length > 0) {
@@ -186,9 +186,9 @@ app.post('/posts', async (req, res) => {
     }
 });
 
-// 修改貼文（僅限管理員，支援多張圖片）
+// 修改貼文（僅限管理員，支援多張圖片和贊助商資訊）
 app.put('/posts/:id', async (req, res) => {
-    const { user_id, content, images } = req.body;
+    const { user_id, content, images, donate_name, donate_url, donate_engname } = req.body;
     const { id } = req.params;
     if (user_id !== 999) {
         return res.status(403).json({ message: '只有管理員可以修改贊助貼文' });
@@ -197,8 +197,8 @@ app.put('/posts/:id', async (req, res) => {
     try {
         await clientConn.query('BEGIN');
         const result = await clientConn.query(
-            'UPDATE posts SET content=$1, updated_at=NOW() WHERE id=$2 AND user_id=999 RETURNING *',
-            [content, id]
+            'UPDATE posts SET content=$1, donate_name=$2, donate_url=$3, donate_engname=$4, updated_at=NOW() WHERE id=$5 AND user_id=999 RETURNING *',
+            [content, donate_name, donate_url, donate_engname, id]
         );
         if (result.rows.length === 0) {
             await clientConn.query('ROLLBACK');
