@@ -2,7 +2,7 @@ const { injectSpeedInsights } = require('@vercel/speed-insights');
 const express = require('express');
 const cors = require('cors'); // 引入 cors 中間件
 const { Client } = require('pg'); // 引入 pg 客戶端
-
+//https://leya-backend-vercel.vercel.app/posts
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -47,37 +47,6 @@ app.get('/', (req, res) => {
     res.send('Hello World!')
 })
 
-app.post('/chat', async (req, res) => {
-    const webhookUrl = "https://yu0402-n8n-free.hf.space/webhook/chat";
-    const { message, userId } = req.body;
-
-    if (!message) {
-        return res.status(400).json({ message: '缺少 message 參數' });
-    }
-
-    try {
-        const response = await fetch(webhookUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                message,
-                userId: userId || "demo-visitor"
-            })
-        });
-
-        const data = await response.json();
-        const replyData = data[0]?.output || {};
-        const reply = {
-            reply: replyData.reply || "🤖 沒有回應",
-            encouragement: replyData.encouragement || "",
-            emotion: replyData.emotion || "未知"
-        };
-        res.json(reply);
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: "伺服器錯誤，請稍後再試。" });
-    }
-});
 
 // 註冊路由
 app.post('/register', async (req, res) => {
@@ -275,6 +244,80 @@ app.delete('/posts/:id', async (req, res) => {
     } catch (err) {
         console.error('Delete post error', err.stack);
         res.status(500).json({ message: '伺服器錯誤' });
+    }
+});
+
+
+//聊天功能
+app.post('/chat', async (req, res) => {
+    const webhookUrl = "https://yu0402-n8n-free.hf.space/webhook/chat";
+    const { message, userId } = req.body;
+
+    if (!message) {
+        return res.status(400).json({ message: '缺少 message 參數' });
+    }
+
+    try {
+        const response = await fetch(webhookUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                message,
+                userId: userId || "demo-visitor"
+            })
+        });
+
+        const data = await response.json();
+        const replyData = data[0]?.output || {};
+        const reply = {
+            reply: replyData.reply || "🤖 沒有回應",
+            encouragement: replyData.encouragement || "",
+            emotion: replyData.emotion || "未知"
+        };
+        res.json(reply);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "伺服器錯誤，請稍後再試。" });
+    }
+});
+
+//儲存聊天訊息
+app.post('/chat-history', async (req, res) => {
+    const { username, user_message, bot_message, encourage_text, emotion } = req.body;
+    if (!username || !user_message || !bot_message) {
+        return res.status(400).json({ message: '缺少必要欄位' });
+    }
+    try {
+        await client.query(
+            `INSERT INTO chat_history (username, user_message, bot_message, encourage_text, emotion)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [username, user_message, bot_message, encourage_text, emotion]
+        );
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: '資料庫錯誤' });
+    }
+});
+
+//取得聊天訊息
+app.get('/chat-history', async (req, res) => {
+    const { username } = req.query;
+    if (!username) {
+        return res.status(400).json({ message: '缺少 username 參數' });
+    }
+    try {
+        const result = await client.query(
+            `SELECT user_message, bot_message, encourage_text, emotion, created_time
+             FROM chat_history
+             WHERE username = $1
+             ORDER BY created_time ASC`,
+            [username]
+        );
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: '資料庫錯誤' });
     }
 });
 
