@@ -119,12 +119,12 @@ app.get('/api/emotion-image/:emotion', async (req, res) => {
 
     try {
         const result = await client.query(
-            'SELECT image_url FROM emotion_imageurl WHERE emotion = $1 ORDER BY RANDOM() LIMIT 1',
+            'SELECT imageurl FROM emotion_imageurl WHERE emotion = $1 ORDER BY RANDOM() LIMIT 1',
             [emotion]
         );
 
         if (result.rows.length > 0) {
-            res.json({ imageUrl: result.rows[0].image_url });
+            res.json({ imageUrl: result.rows[0].imageurl });
         } else {
             res.status(404).json({ message: '找不到對應情緒的圖片' });
         }
