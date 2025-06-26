@@ -321,6 +321,35 @@ app.get('/chat-history', async (req, res) => {
     }
 });
 
+// 根據情緒隨機取得圖片 URL
+app.get('/emotion-image/:emotion', async (req, res) => {
+    const { emotion } = req.params;
+    // 將前端傳來的情緒名稱對應到資料庫中的儲存值
+    // 例如，如果前端傳來 'happy'，而資料庫儲存的是 '快樂'
+    // 這裡可以做一個映射，或者確保前端傳來的值與資料庫一致
+    // 為了簡單起見，假設前端會直接傳來資料庫中儲存的情緒中文名稱
+
+    if (!emotion) {
+        return res.status(400).json({ message: '缺少 emotion 參數' });
+    }
+
+    try {
+        const result = await client.query(
+            'SELECT imageurl FROM emotion_imageurl WHERE emotion = $1 ORDER BY RANDOM() LIMIT 1',
+            [emotion]
+        );
+
+        if (result.rows.length > 0) {
+            res.json({ imageUrl: result.rows[0].imageurl });
+        } else {
+            res.status(404).json({ message: '找不到對應情緒的圖片' });
+        }
+    } catch (err) {
+        console.error('Error fetching emotion image', err.stack);
+        res.status(500).json({ message: '伺服器錯誤' });
+    }
+});
+
 // 啟動伺服器
 app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
