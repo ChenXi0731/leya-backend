@@ -318,9 +318,21 @@ app.post('/chat-history', async (req, res) => {
                     backgroundImageUrl = emotionImageResult.rows[0].imageurl;
                     console.log(`[ChatHistory] 成功獲取到 emotion '${emotion}' 的背景圖片 URL: ${backgroundImageUrl}`);
                 } else {
-                    console.warn(`[ChatHistory] 未找到 emotion '${emotion}' 對應的背景圖片。`);
-                    // 您可以在這裡決定是否使用一個預設的背景圖片 URL
-                    // backgroundImageUrl = 'https://example.com/default-background.jpg'; 
+                    try{emotionImageResult = await client.query(
+                        'SELECT imageurl FROM emotion_imageurl WHERE emotion = "通用" ORDER BY RANDOM() LIMIT 1'
+                    );
+                    console.log(`[ChatHistory] 未找到 emotion '${emotion}' 對應的背景圖片，因此採用通用圖片。`);
+
+                    if (emotionImageResult.rows.length > 0) {
+                        backgroundImageUrl = emotionImageResult.rows[0].imageurl;
+                        console.log(`[ChatHistory] 成功獲取到通用的背景圖片 URL: ${backgroundImageUrl}`);
+                    }else{
+                        console.warn(`[ChatHistory] 未找到 emotion '${emotion}' 對應的背景圖片，通用圖片採用亦失敗`);
+                    }
+                }catch(commonErr){
+                    console.error(`[ChatHistory] 查詢 emotion_imageurl 表時出錯: ${commonErr.message}`, commonErr.stack);
+                }
+                    
                 }
             } catch (dbError) {
                 console.error(`[ChatHistory] 查詢 emotion_imageurl 表時出錯: ${dbError.message}`, dbError.stack);
