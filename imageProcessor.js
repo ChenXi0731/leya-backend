@@ -23,25 +23,6 @@ async function initializeFont() {
     }
 }
 
-// 文字自動換行函數 (與您提供的一致)
-function wrapText(text, maxCharsPerLine) {
-    const words = text.split('');
-    const lines = [];
-    let currentLine = '';
-    for (const char of words) {
-        if (currentLine.length >= maxCharsPerLine) {
-            lines.push(currentLine);
-            currentLine = char;
-        } else {
-            currentLine += char;
-        }
-    }
-    if (currentLine) {
-        lines.push(currentLine);
-    }
-    return lines;
-}
-
 async function overlayTextOnImage(imageUrl, text, fontSizeRatio = 0.05) {
     console.log(`[imageProcessor] 開始處理圖片疊加。背景圖 URL: ${imageUrl}`);
     await initializeFont(); // 確保字體已初始化
@@ -62,19 +43,26 @@ async function overlayTextOnImage(imageUrl, text, fontSizeRatio = 0.05) {
 
     // 2. 獲取圖片資訊
     const imageInfo = await sharp(imageBuffer).metadata();
-    const { width, height } = imageInfo;
+    let { width, height } = imageInfo;
     if (!width || !height) {
         console.error(`[imageProcessor] ❌ 無法獲取圖片尺寸。寬: ${width}, 高: ${height}`);
         throw new Error('無法獲取有效的圖片尺寸');
     }
     console.log(`[imageProcessor] 📐 圖片尺寸: ${width}x${height}`);
 
-    // 3. 計算字體大小和換行
+    // 2.5. 縮放圖片（最大邊長不超過 1080px）
+    const maxSide = 1080;
+    let scale = 1;
+    if (width > maxSide || height > maxSide) {
+        scale = Math.min(maxSide / width, maxSide / height);
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+        imageBuffer = await sharp(imageBuffer).resize(width, height).toBuffer();
+        console.log(`[imageProcessor] 🔄 已縮放圖片至: ${width}x${height}`);
+    }
+
+    // 3. 計算字體大小
     const fontSize = Math.floor(height * fontSizeRatio);
-    // 根據經驗調整每行最大字元數的計算，中文和英文略有不同，這裡假設一個通用值
-    const maxCharsPerLine = Math.floor(width / fontSize * 1.5); // 調整了係數
-    const lines = wrapText(text, maxCharsPerLine);
-    console.log(`[imageProcessor] 📝 文字行數: ${lines.length}, 每行最大字數: ${maxCharsPerLine}, 字體大小: ${fontSize}px`);
 
     // 4. 創建Canvas並繪製文字
     const canvas = createCanvas(width, height);
@@ -85,6 +73,28 @@ async function overlayTextOnImage(imageUrl, text, fontSizeRatio = 0.05) {
     ctx.fillStyle = 'white'; // 文字顏色
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
+
+    // 新的根據像素寬度自動換行函數
+    function wrapTextByWidth(ctx, text, maxWidth) {
+        const lines = [];
+        let line = '';
+        for (let i = 0; i < text.length; i++) {
+            const testLine = line + text[i];
+            const metrics = ctx.measureText(testLine);
+            if (metrics.width > maxWidth && line !== '') {
+                lines.push(line);
+                line = text[i];
+            } else {
+                line = testLine;
+            }
+        }
+        if (line) lines.push(line);
+        return lines;
+    }
+
+    const maxTextWidth = width * 0.9; // 讓文字左右有留白
+    const lines = wrapTextByWidth(ctx, text, maxTextWidth);
+    console.log(`[imageProcessor] 📝 文字行數: ${lines.length}, maxTextWidth: ${maxTextWidth}, 字體大小: ${fontSize}px`);
 
     const lineHeight = fontSize * 1.2; // 調整行高，使其更舒適
     const totalTextHeight = (lines.length - 1) * lineHeight; // 總文字塊高度
@@ -109,13 +119,30 @@ async function overlayTextOnImage(imageUrl, text, fontSizeRatio = 0.05) {
 
     // 6. 合成最終圖片
     console.log('[imageProcessor] 🖼️ 正在合成最終圖片...');
-    const finalImageBuffer = await sharp(imageBuffer)
+    let finalImageBuffer = await sharp(imageBuffer)
         .composite([
             { input: overlayMaskBuffer, blend: 'over' }, // 先疊加遮罩
             { input: textLayerBuffer, blend: 'over' }    // 再疊加文字層
         ])
-        .png() // 輸出為 PNG 格式
+        .png({ quality: 80, compressionLevel: 9 }) // 輸出為 PNG 格式，壓縮品質
         .toBuffer();
+
+    // 7. 若仍超過 1MB，進一步壓縮（轉成 JPEG 並調整品質）
+    if (finalImageBuffer.length > 1024 * 1024) {
+        console.log(`[imageProcessor] ⚠️ PNG 超過 1MB，嘗試轉為 JPEG 並壓縮...`);
+        finalImageBuffer = await sharp(finalImageBuffer)
+            .jpeg({ quality: 80 })
+            .toBuffer();
+        // 若還是超過 1MB，再降品質
+        let quality = 70;
+        while (finalImageBuffer.length > 1024 * 1024 && quality >= 40) {
+            finalImageBuffer = await sharp(finalImageBuffer)
+                .jpeg({ quality })
+                .toBuffer();
+            quality -= 10;
+        }
+        console.log(`[imageProcessor] JPEG 壓縮後大小: ${(finalImageBuffer.length / 1024).toFixed(1)} KB`);
+    }
 
     console.log('[imageProcessor] ✅ 圖片疊加處理完成。');
     return finalImageBuffer;
