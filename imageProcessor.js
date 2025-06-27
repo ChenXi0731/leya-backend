@@ -5,7 +5,7 @@ const fs = require('fs').promises; // 用於異步檔案操作
 const { createCanvas, registerFont } = require('canvas');
 
 // 註冊字體（確保字體檔案在部署時可用）
-const fontPath = path.join(__dirname, 'SourceHanSerifTC-Bold.otf'); // 假設字體檔案在專案根目錄
+const fontPath = path.join(__dirname, 'ChenYuluoyan-Thin-Monospaced.ttf'); // 假設字體檔案在專案根目錄
 let fontRegistered = false;
 
 async function initializeFont() {
@@ -17,7 +17,7 @@ async function initializeFont() {
         fontRegistered = true;
         return true;
     } catch (error) {
-        console.warn('⚠️ 外部字體 SourceHanSerifTC-Bold.otf 不存在或加載失敗，將使用預設字體 Arial。錯誤:', error.message);
+        console.warn('⚠️ 外部字體 ChenYuluoyan-Thin-Monospaced.ttf 不存在或加載失敗，將使用預設字體 Arial。錯誤:', error.message);
         fontRegistered = false; // 即使失敗也標記，避免重複嘗試
         return false;
     }
