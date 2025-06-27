@@ -12,8 +12,8 @@ async function initializeFont() {
     if (fontRegistered) return true;
     try {
         await fs.access(fontPath); // 檢查檔案是否存在
-        registerFont(fontPath, { family: 'SourceHanSerifTC' });
-        console.log('✅ 外部字體 SourceHanSerifTC-Bold.otf 加載成功');
+        registerFont(fontPath, { family: 'MyCustomFont' });
+        console.log(`✅ 外部字體 ${fontPath} 以 family 名稱 'MyCustomFont' 加載成功`);
         fontRegistered = true;
         return true;
     } catch (error) {
@@ -80,14 +80,14 @@ async function overlayTextOnImage(imageUrl, text, fontSizeRatio = 0.05) {
     const canvas = createCanvas(width, height);
     const ctx = canvas.getContext('2d');
 
-    const fontFamily = fontRegistered ? 'SourceHanSerifTC' : 'Arial'; // 根據字體加載情況選擇
+    const fontFamily = fontRegistered ? 'MyCustomFont' : 'Arial';
     ctx.font = `${fontSize}px ${fontFamily}`;
     ctx.fillStyle = 'white'; // 文字顏色
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
 
     const lineHeight = fontSize * 1.2; // 調整行高，使其更舒適
-    const totalTextHeight = (lines.length -1) * lineHeight; // 總文字塊高度
+    const totalTextHeight = (lines.length - 1) * lineHeight; // 總文字塊高度
     const startY = (height - totalTextHeight) / 2; // 文字塊垂直居中
 
     lines.forEach((line, index) => {

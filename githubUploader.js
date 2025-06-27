@@ -16,6 +16,7 @@ const GITHUB_BRANCH = process.env.GITHUB_BRANCH || 'main'; // 您希望提交到
  * @returns {Promise<string|null>} - 成功時回傳圖片在 GitHub 上的 raw URL，失敗時回傳 null
  */
 async function uploadToGithub(username, imageBuffer, filenamePrefix = 'chat_image') {
+
     if (!GITHUB_TOKEN || !GITHUB_OWNER || !GITHUB_REPO) {
         console.error('[GitHubUploader] 錯誤：缺少必要的 GitHub 環境變數 (TOKEN, OWNER, REPO)。請檢查 .env 設定。');
         return null;
@@ -32,11 +33,11 @@ async function uploadToGithub(username, imageBuffer, filenamePrefix = 'chat_imag
     // 2. 構造檔案名稱和路徑
     // 確保檔案名稱的唯一性，可以加入時間戳或 UUID
     const timestamp = Date.now();
-    const filename = `${filenamePrefix}_${username}_${timestamp}.png`;
+    const filename = `${filenamePrefix}_${username}_${timestamp}.webp`;
     const filePathInRepo = `${GITHUB_IMAGE_PATH}/${filename}`.replace(/\/\//g, '/'); // 確保路徑分隔符為 '/'
 
     // 3. 構造 GitHub API URL
-    const apiUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/${filePathInRepo}`;
+    const apiUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${filePathInRepo}`;
 
     // 4. 構造請求 Body
     const commitMessage = `Upload chat image for user ${username} - ${filename}`;
@@ -52,6 +53,7 @@ async function uploadToGithub(username, imageBuffer, filenamePrefix = 'chat_imag
         'Accept': 'application/vnd.github.v3+json',
         'Content-Type': 'application/json'
     };
+    console.log('[GitHubUploader] Loaded GITHUB_TOKEN (first 10 chars):', GITHUB_TOKEN ? GITHUB_TOKEN.substring(0, 10) : 'NOT LOADED');
 
     console.log(`[GitHubUploader] 準備上傳圖片到 GitHub: ${apiUrl}`);
 
