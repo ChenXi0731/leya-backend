@@ -1,7 +1,11 @@
+require('dotenv').config();
+
 const { injectSpeedInsights } = require('@vercel/speed-insights');
 const express = require('express');
 const cors = require('cors'); // 引入 cors 中間件
 const { Client } = require('pg'); // 引入 pg 客戶端
+const { overlayTextOnImage } = require('./imageProcessor');
+const { uploadToGithub } = require('./githubUploader');
 //https://leya-backend-vercel.vercel.app/posts
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -288,15 +292,101 @@ app.post('/chat-history', async (req, res) => {
         return res.status(400).json({ message: '缺少必要欄位' });
     }
     try {
+        // 1. 儲存聊天記錄到 chat_history 表 (這是您已有的邏輯)
         await client.query(
             `INSERT INTO chat_history (username, user_message, bot_message, encourage_text, emotion)
              VALUES ($1, $2, $3, $4, $5)`,
             [username, user_message, bot_message, encourage_text, emotion]
         );
-        res.json({ success: true });
+        console.log(`[ChatHistory] 聊天記錄已儲存至資料庫: user=${username}`);
+
+        // --- 開始新增的圖片處理流程 ---
+        if (emotion && encourage_text) {
+            console.log(`[ChatHistory] 偵測到 emotion (${emotion}) 和 encourage_text，準備處理圖片。`);
+            let backgroundImageUrl = null;
+
+            // 2. 根據 emotion 從 emotion_imageurl 表獲取背景圖片 URL
+            try {
+                const emotionImageResult = await client.query(
+                    'SELECT imageurl FROM emotion_imageurl WHERE emotion = $1 ORDER BY RANDOM() LIMIT 1',
+                    [emotion]
+                );
+
+                if (emotionImageResult.rows.length > 0) {
+                    backgroundImageUrl = emotionImageResult.rows[0].imageurl;
+                    console.log(`[ChatHistory] 成功獲取到 emotion '${emotion}' 的背景圖片 URL: ${backgroundImageUrl}`);
+                } else {
+                    console.warn(`[ChatHistory] 未找到 emotion '${emotion}' 對應的背景圖片。`);
+                    // 您可以在這裡決定是否使用一個預設的背景圖片 URL
+                    // backgroundImageUrl = 'https://example.com/default-background.jpg'; 
+                }
+            } catch (dbError) {
+                console.error(`[ChatHistory] 查詢 emotion_imageurl 表時出錯: ${dbError.message}`, dbError.stack);
+                // 即使這裡出錯，也可能希望聊天記錄本身的回應成功，所以不直接 return res.status(500)
+            }
+
+            // 3. 如果獲取到背景圖 URL，則進行圖片合成
+            if (backgroundImageUrl) {
+                try {
+                    console.log(`[ChatHistory] 開始合成圖片。背景: ${backgroundImageUrl}, 文字: "${encourage_text}"`);
+                    const imageBuffer = await overlayTextOnImage(backgroundImageUrl, encourage_text);
+                    console.log(`[ChatHistory] 圖片合成成功 (Buffer 長度: ${imageBuffer.length} bytes)。`);
+
+                    // 4. 上傳 imageBuffer 到 GitHub
+                    let githubImageUrl = null;
+                    if (imageBuffer && imageBuffer.length > 0) {
+                        console.log(`[ChatHistory] 準備上傳圖片到 GitHub for user: ${username}`);
+                        githubImageUrl = await uploadToGithub(username, imageBuffer);
+                        
+                        if (githubImageUrl) {
+                            console.log(`[ChatHistory] GitHub 上傳完成，圖片 URL: ${githubImageUrl}`);
+                        } else {
+                            console.warn(`[ChatHistory] GitHub 上傳失敗或未返回 URL for user: ${username}`);
+                        }
+                    } else {
+                        console.warn(`[ChatHistory] imageBuffer 為空或無效，跳過 GitHub 上傳 for user: ${username}`);
+                    }
+                    
+                    // 5. 將 githubImageUrl 和 username 存到 user_chat_image 表
+                    if (githubImageUrl) {
+                        try {
+                            await client.query(
+                                'INSERT INTO user_chat_image (username, image_url) VALUES ($1, $2)',
+                                [username, githubImageUrl]
+                            );
+                            console.log(`[ChatHistory] 圖片連結已儲存至 user_chat_image: user=${username}, url=${githubImageUrl}`);
+                        } catch (dbInsertError) {
+                            console.error(`[ChatHistory] 儲存圖片連結到 user_chat_image 表失敗 for user ${username}: ${dbInsertError.message}`, dbInsertError.stack);
+                            // 即使這裡失敗，也可能不希望影響主 API 回應
+                        }
+                    } else {
+                        console.warn(`[ChatHistory] 未能獲取 GitHub 圖片 URL，跳過儲存到 user_chat_image for user: ${username}`);
+                    }
+
+                } catch (imageProcessingError) {
+                    console.error(`[ChatHistory] 圖片處理或後續流程失敗 (user: ${username}): ${imageProcessingError.message}`, imageProcessingError.stack);
+                    // 這裡的錯誤不應影響聊天記錄儲存成功的主回應
+                    // 但您可能想記錄這個特定使用者的圖片生成失敗事件
+                }
+            } else {
+                console.log(`[ChatHistory] 因未獲取到背景圖片 URL，跳過 ${username} 的圖片合成流程。`);
+            }
+        } else {
+            console.log(`[ChatHistory] 未提供 emotion 或 encourage_text，跳過 ${username} 的圖片處理流程。`);
+        }
+        // --- 圖片處理流程結束 ---
+
+        // 無論圖片處理是否成功，都回傳聊天記錄儲存成功的訊息
+        // 圖片生成是一個背景的、附加的過程
+        res.status(201).json({ 
+            success: true, 
+            message: '聊天記錄已儲存。',
+            // 可以考慮在這裡加一個提示，比如：'圖片正在生成中 (如果適用)' 
+        });
+
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ message: '資料庫錯誤' });
+        console.error('[ChatHistory] 儲存聊天記錄到資料庫時發生主錯誤:', err.stack);
+        res.status(500).json({ success: false, message: '資料庫錯誤，儲存聊天記錄失敗' });
     }
 });
 
