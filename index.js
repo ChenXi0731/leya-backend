@@ -293,11 +293,13 @@ app.post('/chat-history', async (req, res) => {
     }
     try {
         // 1. 儲存聊天記錄到 chat_history 表 (這是您已有的邏輯)
-        await client.query(
+        const insertResult = await client.query(
             `INSERT INTO chat_history (username, user_message, bot_message, encourage_text, emotion)
-             VALUES ($1, $2, $3, $4, $5)`,
+             VALUES ($1, $2, $3, $4, $5)
+             RETURNING id`,
             [username, user_message, bot_message, encourage_text, emotion]
         );
+        const chatHistoryId = insertResult.rows[0].id;
         console.log(`[ChatHistory] 聊天記錄已儲存至資料庫: user=${username}`);
 
         // --- 開始新增的圖片處理流程 ---
@@ -351,8 +353,8 @@ app.post('/chat-history', async (req, res) => {
                     if (githubImageUrl) {
                         try {
                             await client.query(
-                                'INSERT INTO user_chat_image (username, image_url) VALUES ($1, $2)',
-                                [username, githubImageUrl]
+                                'INSERT INTO user_chat_image (username, image_url, chat_history_id) VALUES ($1, $2, $3)',
+                                [username, githubImageUrl, chatHistoryId]
                             );
                             console.log(`[ChatHistory] 圖片連結已儲存至 user_chat_image: user=${username}, url=${githubImageUrl}`);
                         } catch (dbInsertError) {
@@ -398,10 +400,11 @@ app.get('/chat-history', async (req, res) => {
     }
     try {
         const result = await client.query(
-            `SELECT user_message, bot_message, encourage_text, emotion, created_time
-             FROM chat_history
-             WHERE username = $1
-             ORDER BY created_time ASC`,
+            `SELECT ch.user_message, ch.bot_message, ch.encourage_text, ch.emotion, ch.created_time, uci.image_url
+             FROM chat_history ch
+             LEFT JOIN user_chat_image uci ON ch.id = uci.chat_history_id
+             WHERE ch.username = $1
+             ORDER BY ch.created_time ASC`,
             [username]
         );
         res.json(result.rows);
