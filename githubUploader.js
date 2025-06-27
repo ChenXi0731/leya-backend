@@ -36,7 +36,7 @@ async function uploadToGithub(username, imageBuffer, filenamePrefix = 'chat_imag
     const filePathInRepo = `${GITHUB_IMAGE_PATH}/${filename}`.replace(/\/\//g, '/'); // 確保路徑分隔符為 '/'
 
     // 3. 構造 GitHub API URL
-    const apiUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/contents/${filePathInRepo}`;
+    const apiUrl = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/${filePathInRepo}`;
 
     // 4. 構造請求 Body
     const commitMessage = `Upload chat image for user ${username} - ${filename}`;
