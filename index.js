@@ -318,20 +318,22 @@ app.post('/chat-history', async (req, res) => {
                     backgroundImageUrl = emotionImageResult.rows[0].imageurl;
                     console.log(`[ChatHistory] 成功獲取到 emotion '${emotion}' 的背景圖片 URL: ${backgroundImageUrl}`);
                 } else {
-                    try{emotionImageResult = await client.query(
-                        'SELECT imageurl FROM emotion_imageurl WHERE emotion = "通用" ORDER BY RANDOM() LIMIT 1'
-                    );
-                    console.log(`[ChatHistory] 未找到 emotion '${emotion}' 對應的背景圖片，因此採用通用圖片。`);
+                    try {
+                        const commonEmotionResult = await client.query(
+                            'SELECT imageurl FROM emotion_imageurl WHERE emotion = $1 ORDER BY RANDOM() LIMIT 1',
+                            ['通用']
+                        );
+                        console.log(`[ChatHistory] 未找到 emotion '${emotion}' 對應的背景圖片，因此採用通用圖片。`);
 
-                    if (emotionImageResult.rows.length > 0) {
-                        backgroundImageUrl = emotionImageResult.rows[0].imageurl;
-                        console.log(`[ChatHistory] 成功獲取到通用的背景圖片 URL: ${backgroundImageUrl}`);
-                    }else{
-                        console.warn(`[ChatHistory] 未找到 emotion '${emotion}' 對應的背景圖片，通用圖片採用亦失敗`);
+                        if (commonEmotionResult.rows.length > 0) {
+                            backgroundImageUrl = commonEmotionResult.rows[0].imageurl;
+                            console.log(`[ChatHistory] 成功獲取到通用的背景圖片 URL: ${backgroundImageUrl}`);
+                        } else {
+                            console.warn(`[ChatHistory] 未找到 emotion '${emotion}' 對應的背景圖片，通用圖片採用亦失敗`);
+                        }
+                    } catch(commonErr) {
+                        console.error(`[ChatHistory] 查詢 emotion_imageurl 表時出錯: ${commonErr.message}`, commonErr.stack);
                     }
-                }catch(commonErr){
-                    console.error(`[ChatHistory] 查詢 emotion_imageurl 表時出錯: ${commonErr.message}`, commonErr.stack);
-                }
                     
                 }
             } catch (dbError) {
