@@ -693,7 +693,7 @@ app.post('/analyze-stress', async (req, res) => {
             `[${idx + 1}] 心情: ${mood.mood || '無'} | 內容: ${mood.content || '無'}`
         ).join('\n');
 
-        const prompt = `你是一位專業的心理健康分析師。請根據以下用戶的聊天記錄和心情日記，分析其壓力來源，並以 JSON 格式回傳 3-8 條壓力來源分析記錄。
+        const prompt = `你是一位專業的心理健康分析師。請根據以下用戶的聊天記錄和心情日記，分析其壓力來源。
 
 聊天記錄：
 ${chatSummary}
@@ -701,24 +701,25 @@ ${chatSummary}
 心情日記：
 ${moodSummary}
 
-請分析並回傳 JSON 陣列，格式如下（必須是有效的 JSON）：
-[
-  {
-    "category": "來源類型（如：學業、人際、家庭、財務、健康、未來等）",
-    "source": "來源細項（具體的壓力來源，如：考試壓力、報告負荷等）",
-    "impact": "影響面向（如：睡眠、時間管理、情緒波動等）",
-    "emotion": "主要感受（如：焦慮、壓迫、憤怒、自責等）",
-    "note": "詳細說明（20-40字的具體描述）"
-  }
-]
+請分析壓力來源並回傳 JSON 物件，格式範例：
+{
+  "analysis": [
+    {
+      "category": "學業",
+      "source": "考試壓力",
+      "impact": "睡眠",
+      "emotion": "焦慮",
+      "note": "期末考臨近，準備不足導致睡眠品質下降"
+    }
+  ]
+}
 
 要求：
-1. 必須回傳有效的 JSON 陣列
-2. 根據實際記錄內容進行分析，不要憑空捏造
-3. 每條記錄都應該有明確的依據
-4. category 應該使用繁體中文，且限於常見類別
-5. 回傳 3-8 條最重要的壓力來源分析
-6. 只回傳 JSON，不要其他文字說明`;
+1. 回傳包含 analysis 陣列的 JSON 物件
+2. 根據實際記錄內容分析，回傳 3-8 條記錄
+3. category 使用繁體中文：學業、人際、家庭、財務、健康、未來等
+4. 每條記錄必須有明確依據
+5. note 欄位 20-40 字具體描述`;
 
         // 4. 呼叫 OpenAI API
         const resp = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -732,12 +733,13 @@ ${moodSummary}
                 messages: [
                     { 
                         role: 'system', 
-                        content: 'You are a professional mental health analyst. Analyze user data and respond with valid JSON only in Traditional Chinese.' 
+                        content: 'You are a professional mental health analyst. Always respond with valid JSON array only. Do not use markdown code blocks or any other formatting. Response must start with [ and end with ].' 
                     },
                     { role: 'user', content: prompt }
                 ],
                 temperature: 0.7,
-                max_tokens: 2000
+                max_tokens: 2000,
+                response_format: { type: "json_object" }
             })
         });
 
@@ -748,18 +750,39 @@ ${moodSummary}
         }
 
         const data = await resp.json();
-        const content = data?.choices?.[0]?.message?.content || '';
+        let content = data?.choices?.[0]?.message?.content || '';
+        
+        // 清理 OpenAI 回應：移除 markdown 代碼塊標記
+        content = content.trim();
+        // 移除 ```json 開頭和 ``` 結尾
+        content = content.replace(/^```json\s*/i, '').replace(/^```\s*/i, '');
+        content = content.replace(/\s*```$/i, '');
+        content = content.trim();
         
         let analysisResults = [];
         try {
             // 嘗試解析 JSON
             const parsed = JSON.parse(content);
-            analysisResults = Array.isArray(parsed) ? parsed : [parsed];
+            // 如果回傳的是物件且包含 analysis 陣列
+            if (parsed.analysis && Array.isArray(parsed.analysis)) {
+                analysisResults = parsed.analysis;
+            } 
+            // 如果回傳的直接是陣列
+            else if (Array.isArray(parsed)) {
+                analysisResults = parsed;
+            }
+            // 如果是單一物件，轉為陣列
+            else if (typeof parsed === 'object') {
+                analysisResults = [parsed];
+            }
         } catch (e) {
-            console.error('JSON parse error:', e, 'Content:', content);
+            console.error('JSON parse error:', e);
+            console.error('Original content:', data?.choices?.[0]?.message?.content);
+            console.error('Cleaned content:', content);
             return res.status(500).json({ 
                 success: false, 
-                message: 'AI 回應格式錯誤，無法解析分析結果' 
+                message: 'AI 回應格式錯誤，無法解析分析結果',
+                debug: process.env.NODE_ENV === 'development' ? content : undefined
             });
         }
 
