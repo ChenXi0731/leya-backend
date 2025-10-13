@@ -544,7 +544,7 @@ app.get('/relax-tips', async (req, res) => {
         if (isNaN(count) || count < 1) count = 3;
         if (count > 5) count = 5;
 
-        const prompt = `請以繁體中文產生 ${count} 則可立即實踐的放鬆小訣竅，每則 12~20 個字以內，內容務必健康、正向且安全。只回傳純文字。`;
+        const prompt = `請以繁體中文產生 ${count} 則可立即實踐的放鬆小訣竅，每則 12~20 個字以內，內容務必健康、正向且安全。只回傳 JSON，格式：{"tips":["...","..."]}。`;
 
         const resp = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
