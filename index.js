@@ -591,6 +591,54 @@ app.get('/relax-tips', async (req, res) => {
     }
 });
 
+// 暖心小語（使用 OpenAI，最多 10 個中文字）
+app.get('/warm-words', async (req, res) => {
+    try {
+        const apiKey = process.env.OPENAI_API_KEY;
+        if (!apiKey) {
+            return res.status(500).json({ success: false, message: '伺服器未設定 OPENAI_API_KEY' });
+        }
+
+        const prompt = '請輸出一段不超過 10 個中文字的暖心小語，語氣溫柔正向。只回傳純文字，不要任何標點、emoji、引號或前綴。';
+
+        const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+                model: 'gpt-4o-mini',
+                messages: [
+                    { role: 'system', content: 'You respond in Traditional Chinese with very short, warm phrases only.' },
+                    { role: 'user', content: prompt }
+                ],
+                temperature: 0.7,
+                max_tokens: 50
+            })
+        });
+
+        if (!resp.ok) {
+            const text = await resp.text();
+            console.error('OpenAI warm-words error:', text);
+            return res.status(502).json({ success: false, message: 'OpenAI 呼叫失敗' });
+        }
+
+        const data = await resp.json();
+        let text = (data?.choices?.[0]?.message?.content || '').trim();
+        // 移除不必要的符號與換行
+        text = text.replace(/["'`\n\r]/g, '').replace(/^\s+|\s+$/g, '');
+        // 以「字數」簡單截斷至 10（UTF-16 單位，對一般中英文足夠）
+        if (text.length > 10) text = text.slice(0, 10);
+        if (!text) text = '你做得很好';
+
+        return res.json({ success: true, text });
+    } catch (err) {
+        console.error('warm-words error:', err);
+        return res.status(500).json({ success: false, message: '伺服器錯誤，無法產生暖心小語' });
+    }
+});
+
 // 啟動伺服器
 app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
