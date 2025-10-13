@@ -639,6 +639,236 @@ app.get('/warm-words', async (req, res) => {
     }
 });
 
+// 壓力來源分析：使用 OpenAI 分析用戶的聊天與心情記錄
+app.post('/analyze-stress', async (req, res) => {
+    const { username } = req.body;
+    
+    if (!username) {
+        return res.status(400).json({ success: false, message: '缺少必要欄位：username' });
+    }
+
+    try {
+        const apiKey = process.env.OPENAI_API_KEY;
+        if (!apiKey) {
+            return res.status(500).json({ success: false, message: '伺服器未設定 OPENAI_API_KEY' });
+        }
+
+        // 1. 從資料庫查詢用戶的聊天記錄
+        const chatResult = await client.query(
+            `SELECT user_message, bot_message, emotion, created_time 
+             FROM chat_history 
+             WHERE username = $1 
+             ORDER BY created_time DESC 
+             LIMIT 50`,
+            [username]
+        );
+
+        // 2. 從資料庫查詢用戶的心情記錄
+        const moodResult = await client.query(
+            `SELECT content, mood, created_at 
+             FROM mood_history 
+             WHERE username = $1 
+             ORDER BY created_at DESC 
+             LIMIT 30`,
+            [username]
+        );
+
+        const chatHistory = chatResult.rows;
+        const moodHistory = moodResult.rows;
+
+        // 檢查是否有足夠的數據進行分析
+        if (chatHistory.length === 0 && moodHistory.length === 0) {
+            return res.status(404).json({ 
+                success: false, 
+                message: '該用戶沒有足夠的聊天或心情記錄可供分析' 
+            });
+        }
+
+        // 3. 準備提示詞給 OpenAI
+        const chatSummary = chatHistory.map((chat, idx) => 
+            `[${idx + 1}] 用戶: ${chat.user_message || '無'} | 情緒: ${chat.emotion || '無'}`
+        ).join('\n');
+
+        const moodSummary = moodHistory.map((mood, idx) => 
+            `[${idx + 1}] 心情: ${mood.mood || '無'} | 內容: ${mood.content || '無'}`
+        ).join('\n');
+
+        const prompt = `你是一位專業的心理健康分析師。請根據以下用戶的聊天記錄和心情日記，分析其壓力來源，並以 JSON 格式回傳 3-8 條壓力來源分析記錄。
+
+聊天記錄：
+${chatSummary}
+
+心情日記：
+${moodSummary}
+
+請分析並回傳 JSON 陣列，格式如下（必須是有效的 JSON）：
+[
+  {
+    "category": "來源類型（如：學業、人際、家庭、財務、健康、未來等）",
+    "source": "來源細項（具體的壓力來源，如：考試壓力、報告負荷等）",
+    "impact": "影響面向（如：睡眠、時間管理、情緒波動等）",
+    "emotion": "主要感受（如：焦慮、壓迫、憤怒、自責等）",
+    "note": "詳細說明（20-40字的具體描述）"
+  }
+]
+
+要求：
+1. 必須回傳有效的 JSON 陣列
+2. 根據實際記錄內容進行分析，不要憑空捏造
+3. 每條記錄都應該有明確的依據
+4. category 應該使用繁體中文，且限於常見類別
+5. 回傳 3-8 條最重要的壓力來源分析
+6. 只回傳 JSON，不要其他文字說明`;
+
+        // 4. 呼叫 OpenAI API
+        const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+                model: 'gpt-4o-mini',
+                messages: [
+                    { 
+                        role: 'system', 
+                        content: 'You are a professional mental health analyst. Analyze user data and respond with valid JSON only in Traditional Chinese.' 
+                    },
+                    { role: 'user', content: prompt }
+                ],
+                temperature: 0.7,
+                max_tokens: 2000
+            })
+        });
+
+        if (!resp.ok) {
+            const text = await resp.text();
+            console.error('OpenAI stress analysis error:', text);
+            return res.status(502).json({ success: false, message: 'OpenAI 呼叫失敗' });
+        }
+
+        const data = await resp.json();
+        const content = data?.choices?.[0]?.message?.content || '';
+        
+        let analysisResults = [];
+        try {
+            // 嘗試解析 JSON
+            const parsed = JSON.parse(content);
+            analysisResults = Array.isArray(parsed) ? parsed : [parsed];
+        } catch (e) {
+            console.error('JSON parse error:', e, 'Content:', content);
+            return res.status(500).json({ 
+                success: false, 
+                message: 'AI 回應格式錯誤，無法解析分析結果' 
+            });
+        }
+
+        // 5. 將分析結果儲存到 emotion_analysis 資料表
+        const insertedRecords = [];
+        for (const item of analysisResults) {
+            try {
+                const result = await client.query(
+                    `INSERT INTO emotion_analysis (username, category, source, impact, emotion, note, created_at) 
+                     VALUES ($1, $2, $3, $4, $5, $6, NOW()) 
+                     RETURNING *`,
+                    [
+                        username,
+                        item.category || '未分類',
+                        item.source || '未知來源',
+                        item.impact || null,
+                        item.emotion || null,
+                        item.note || null
+                    ]
+                );
+                insertedRecords.push(result.rows[0]);
+            } catch (insertErr) {
+                console.error('Insert emotion_analysis error:', insertErr);
+            }
+        }
+
+        return res.json({ 
+            success: true, 
+            message: `成功分析並儲存 ${insertedRecords.length} 條壓力來源記錄`,
+            records: insertedRecords,
+            count: insertedRecords.length
+        });
+
+    } catch (err) {
+        console.error('Analyze stress error:', err.stack);
+        return res.status(500).json({ 
+            success: false, 
+            message: '伺服器錯誤，壓力來源分析失敗' 
+        });
+    }
+});
+
+// 取得用戶的壓力來源分析記錄
+app.get('/emotion-analysis', async (req, res) => {
+    const { username } = req.query;
+    
+    if (!username) {
+        return res.status(400).json({ success: false, message: '缺少 username 參數' });
+    }
+
+    try {
+        const result = await client.query(
+            `SELECT id, username, category, source, impact, emotion, note, created_at 
+             FROM emotion_analysis 
+             WHERE username = $1 
+             ORDER BY created_at DESC`,
+            [username]
+        );
+
+        return res.json({ 
+            success: true, 
+            records: result.rows,
+            count: result.rows.length
+        });
+    } catch (err) {
+        console.error('Fetch emotion analysis error:', err.stack);
+        return res.status(500).json({ 
+            success: false, 
+            message: '伺服器錯誤，無法取得壓力來源分析記錄' 
+        });
+    }
+});
+
+// 刪除特定壓力來源分析記錄
+app.delete('/emotion-analysis/:id', async (req, res) => {
+    const { id } = req.params;
+    const { username } = req.body;
+
+    if (!id || !username) {
+        return res.status(400).json({ success: false, message: '缺少必要參數' });
+    }
+
+    try {
+        const result = await client.query(
+            'DELETE FROM emotion_analysis WHERE id = $1 AND username = $2 RETURNING *',
+            [id, username]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({ 
+                success: false, 
+                message: '找不到該記錄或無權限刪除' 
+            });
+        }
+
+        return res.json({ 
+            success: true, 
+            message: '刪除成功',
+            record: result.rows[0]
+        });
+    } catch (err) {
+        console.error('Delete emotion analysis error:', err.stack);
+        return res.status(500).json({ 
+            success: false, 
+            message: '伺服器錯誤，無法刪除記錄' 
+        });
+    }
+});
+
 // 啟動伺服器
 app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
