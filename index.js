@@ -428,6 +428,80 @@ app.get('/chat-history', async (req, res) => {
     }
 });
 
+// 心情日記：儲存
+app.post('/mood-journal', async (req, res) => {
+    const { username, content, mood, created_at } = req.body;
+    if (!username) {
+        return res.status(400).json({ success: false, message: '缺少必要欄位：username' });
+    }
+    try {
+        const result = await client.query(
+            'INSERT INTO mood_history (username, content, mood, created_at) VALUES ($1, $2, $3, $4) RETURNING id, username, content, mood, created_at',
+            [username, content || null, mood || null, created_at || new Date().toISOString()]
+        );
+        res.status(201).json({ success: true, item: result.rows[0] });
+    } catch (err) {
+        console.error('Insert mood journal error', err.stack);
+        res.status(500).json({ success: false, message: '伺服器錯誤，無法儲存心情日記' });
+    }
+});
+
+// 心情日記：查詢（依使用者）
+app.get('/mood-journal', async (req, res) => {
+    const { username } = req.query;
+    if (!username) {
+        return res.status(400).json({ success: false, message: '缺少 username 參數' });
+    }
+    try {
+        const result = await client.query(
+            'SELECT id, username, content, mood, created_at FROM mood_history WHERE username = $1 ORDER BY created_at ASC',
+            [username]
+        );
+        res.json({ success: true, items: result.rows });
+    } catch (err) {
+        console.error('Fetch mood journal error', err.stack);
+        res.status(500).json({ success: false, message: '伺服器錯誤，無法取得心情日記' });
+    }
+});
+
+// 心情日記：更新
+app.put('/mood-journal/:id', async (req, res) => {
+    const { id } = req.params;
+    const { content, mood, created_at } = req.body;
+    if (!id) return res.status(400).json({ success: false, message: '缺少 id' });
+    try {
+        let query = 'UPDATE mood_history SET content=$1, mood=$2';
+        const params = [content || null, mood || null];
+        if (created_at) {
+            query += ', created_at=$3 WHERE id=$4 RETURNING id, username, content, mood, created_at';
+            params.push(created_at, id);
+        } else {
+            query += ' WHERE id=$3 RETURNING id, username, content, mood, created_at';
+            params.push(id);
+        }
+        const result = await client.query(query, params);
+        if (result.rows.length === 0) return res.status(404).json({ success: false, message: '找不到該日記' });
+        res.json({ success: true, item: result.rows[0] });
+    } catch (err) {
+        console.error('Update mood journal error', err.stack);
+        res.status(500).json({ success: false, message: '伺服器錯誤，無法更新心情日記' });
+    }
+});
+
+// 心情日記：刪除
+app.delete('/mood-journal/:id', async (req, res) => {
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ success: false, message: '缺少 id' });
+    try {
+        const result = await client.query('DELETE FROM mood_history WHERE id=$1 RETURNING id', [id]);
+        if (result.rows.length === 0) return res.status(404).json({ success: false, message: '找不到該日記' });
+        res.json({ success: true, message: '刪除成功' });
+    } catch (err) {
+        console.error('Delete mood journal error', err.stack);
+        res.status(500).json({ success: false, message: '伺服器錯誤，無法刪除心情日記' });
+    }
+});
+
 // 根據情緒隨機取得圖片 URL
 app.get('/emotion-image/:emotion', async (req, res) => {
     const { emotion } = req.params;
