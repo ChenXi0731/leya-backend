@@ -599,7 +599,7 @@ app.get('/warm-words', async (req, res) => {
             return res.status(500).json({ success: false, message: '伺服器未設定 OPENAI_API_KEY' });
         }
 
-        const prompt = '請輸出一段不超過 10 個中文字的暖心小語，語氣溫柔正向。只回傳純文字，不要任何標點、emoji、引號或前綴。';
+        const prompt = '請輸出一段不超過 10 個中文字的暖心金句，語氣溫柔正向。只回傳純文字，不要任何標點、emoji、引號或前綴。';
 
         const resp = await fetch('https://api.openai.com/v1/chat/completions', {
             method: 'POST',
