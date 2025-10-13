@@ -786,13 +786,16 @@ ${moodSummary}
             });
         }
 
-        // 5. 將分析結果儲存到 emotion_analysis 資料表
+        // 5. 將分析結果儲存到 emotion_analysis 資料表（保留所有歷史記錄）
         const insertedRecords = [];
+        // 記錄當前批次的時間戳，用於標識這次分析
+        const batchTimestamp = new Date();
+        
         for (const item of analysisResults) {
             try {
                 const result = await client.query(
                     `INSERT INTO emotion_analysis (username, category, source, impact, emotion, note, created_at) 
-                     VALUES ($1, $2, $3, $4, $5, $6, NOW()) 
+                     VALUES ($1, $2, $3, $4, $5, $6, $7) 
                      RETURNING *`,
                     [
                         username,
@@ -800,7 +803,8 @@ ${moodSummary}
                         item.source || '未知來源',
                         item.impact || null,
                         item.emotion || null,
-                        item.note || null
+                        item.note || null,
+                        batchTimestamp
                     ]
                 );
                 insertedRecords.push(result.rows[0]);
@@ -808,6 +812,8 @@ ${moodSummary}
                 console.error('Insert emotion_analysis error:', insertErr);
             }
         }
+
+        console.log(`[StressAnalysis] 已為用戶 ${username} 儲存 ${insertedRecords.length} 條新分析記錄`);
 
         return res.json({ 
             success: true, 
@@ -825,7 +831,7 @@ ${moodSummary}
     }
 });
 
-// 取得用戶的壓力來源分析記錄
+// 取得用戶的壓力來源分析記錄（只返回最新一次的分析）
 app.get('/emotion-analysis', async (req, res) => {
     const { username } = req.query;
     
@@ -834,24 +840,97 @@ app.get('/emotion-analysis', async (req, res) => {
     }
 
     try {
+        // 先找出該用戶最新的分析時間
+        const latestTimeResult = await client.query(
+            `SELECT MAX(created_at) as latest_time 
+             FROM emotion_analysis 
+             WHERE username = $1`,
+            [username]
+        );
+
+        const latestTime = latestTimeResult.rows[0]?.latest_time;
+
+        if (!latestTime) {
+            // 如果沒有任何記錄
+            return res.json({ 
+                success: true, 
+                records: [],
+                count: 0
+            });
+        }
+
+        // 取得最新一次分析的所有記錄
         const result = await client.query(
             `SELECT id, username, category, source, impact, emotion, note, created_at 
              FROM emotion_analysis 
-             WHERE username = $1 
-             ORDER BY created_at DESC`,
-            [username]
+             WHERE username = $1 AND created_at = $2
+             ORDER BY id ASC`,
+            [username, latestTime]
         );
 
         return res.json({ 
             success: true, 
             records: result.rows,
-            count: result.rows.length
+            count: result.rows.length,
+            analysisDate: latestTime
         });
     } catch (err) {
         console.error('Fetch emotion analysis error:', err.stack);
         return res.status(500).json({ 
             success: false, 
             message: '伺服器錯誤，無法取得壓力來源分析記錄' 
+        });
+    }
+});
+
+// 取得用戶的所有歷史壓力分析記錄（按時間分組）
+app.get('/emotion-analysis/history', async (req, res) => {
+    const { username } = req.query;
+    
+    if (!username) {
+        return res.status(400).json({ success: false, message: '缺少 username 參數' });
+    }
+
+    try {
+        // 取得所有不同的分析時間
+        const timesResult = await client.query(
+            `SELECT DISTINCT created_at 
+             FROM emotion_analysis 
+             WHERE username = $1 
+             ORDER BY created_at DESC`,
+            [username]
+        );
+
+        const analysisTimes = timesResult.rows.map(row => row.created_at);
+
+        // 為每個時間點取得記錄
+        const historyData = [];
+        for (const time of analysisTimes) {
+            const recordsResult = await client.query(
+                `SELECT id, username, category, source, impact, emotion, note, created_at 
+                 FROM emotion_analysis 
+                 WHERE username = $1 AND created_at = $2
+                 ORDER BY id ASC`,
+                [username, time]
+            );
+
+            historyData.push({
+                analysisDate: time,
+                records: recordsResult.rows,
+                count: recordsResult.rows.length
+            });
+        }
+
+        return res.json({ 
+            success: true, 
+            history: historyData,
+            totalAnalyses: historyData.length
+        });
+    } catch (err) {
+        console.error('Fetch emotion analysis history error:', err.stack);
+        return res.status(500).json({ 
+            success: false, 
+            message: '伺服器錯誤，無法取得壓力分析歷史記錄' 
         });
     }
 });
