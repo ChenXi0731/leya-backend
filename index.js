@@ -531,6 +531,66 @@ app.get('/emotion-image/:emotion', async (req, res) => {
     }
 });
 
+// 產生放鬆小訣竅（使用 OpenAI）
+app.get('/relax-tips', async (req, res) => {
+    try {
+        const apiKey = process.env.OPENAI_API_KEY;
+        if (!apiKey) {
+            return res.status(500).json({ success: false, message: '伺服器未設定 OPENAI_API_KEY' });
+        }
+
+        // 可選參數：提示數量，預設 3，限制 1~5
+        let count = parseInt(req.query.count || '3', 10);
+        if (isNaN(count) || count < 1) count = 3;
+        if (count > 5) count = 5;
+
+        const prompt = `請以繁體中文產生 ${count} 則可立即實踐的放鬆小訣竅，每則 12~20 個字以內，內容務必健康、正向且安全。只回傳 JSON，格式：{"tips":["...","..."]}。`;
+
+        const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+                model: 'gpt-4o-mini',
+                messages: [
+                    { role: 'system', content: 'You generate short, actionable relaxation tips in Traditional Chinese. Respond with valid JSON only.' },
+                    { role: 'user', content: prompt }
+                ],
+                temperature: 0.7,
+                max_tokens: 300
+            })
+        });
+
+        if (!resp.ok) {
+            const text = await resp.text();
+            console.error('OpenAI error:', text);
+            return res.status(502).json({ success: false, message: 'OpenAI 呼叫失敗' });
+        }
+
+        const data = await resp.json();
+        const content = data?.choices?.[0]?.message?.content || '';
+        let tips = [];
+        try {
+            const parsed = JSON.parse(content);
+            if (Array.isArray(parsed?.tips)) tips = parsed.tips;
+        } catch (e) {
+            // 若非 JSON，就嘗試用換行切割，取非空行
+            tips = String(content).split(/\r?\n/).map(s => s.trim()).filter(Boolean).slice(0, count);
+        }
+
+        // 基本清理：限制長度、移除開頭序號
+        tips = tips.map(t => t.replace(/^\d+[\.\)]\s*/, '').slice(0, 40));
+        if (tips.length === 0) tips = ['深呼吸放慢步調', '到窗邊看看遠方', '寫下此刻的小煩惱'];
+
+        return res.json({ success: true, tips });
+    } catch (err) {
+        console.error('relax-tips error:', err);
+        return res.status(500).json({ success: false, message: '伺服器錯誤，無法產生放鬆小訣竅' });
+    }
+});
+
 // 啟動伺服器
 app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
