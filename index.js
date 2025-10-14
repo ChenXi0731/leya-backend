@@ -971,6 +971,243 @@ app.delete('/emotion-analysis/:id', async (req, res) => {
     }
 });
 
+// ==================== 忘記密碼與重設密碼 API ====================
+
+// 忘記密碼 - 發送重設連結
+app.post('/forgot-password', async (req, res) => {
+    const { email } = req.body;
+
+    if (!email) {
+        return res.status(400).json({ 
+            success: false, 
+            message: '請提供電子郵件地址' 
+        });
+    }
+
+    try {
+        // 檢查電子郵件是否存在
+        const checkQuery = 'SELECT id, username, nickname FROM users WHERE email = $1';
+        const checkResult = await client.query(checkQuery, [email]);
+
+        if (checkResult.rows.length === 0) {
+            // 為了安全性，即使郵件不存在也返回成功訊息（防止郵件探測）
+            return res.json({ 
+                success: true, 
+                message: '如果該電子郵件存在於我們的系統中，您將收到重設密碼的連結' 
+            });
+        }
+
+        const user = checkResult.rows[0];
+
+        // 生成重設 token（使用簡單的隨機字串，生產環境應使用更安全的方法）
+        const crypto = require('crypto');
+        const resetToken = crypto.randomBytes(32).toString('hex');
+        const resetTokenExpiry = new Date(Date.now() + 3600000); // 1 小時後過期
+
+        // 儲存 token 到資料庫
+        const updateQuery = `
+            UPDATE users 
+            SET reset_token = $1, reset_token_expiry = $2 
+            WHERE email = $3
+        `;
+        await client.query(updateQuery, [resetToken, resetTokenExpiry, email]);
+
+        // 生成重設連結
+        const frontendUrl = process.env.FRONTEND_URL || 'https://leyatalks.github.io';
+        const resetLink = `${frontendUrl}/leya/reset-password?token=${resetToken}`;
+
+        // 發送郵件（使用 nodemailer）
+        // 注意：需要先安裝 nodemailer: npm install nodemailer
+        const nodemailer = require('nodemailer');
+
+        // 創建郵件傳輸器（使用 Gmail）
+        const transporter = nodemailer.createTransport({
+            service: 'gmail',
+            auth: {
+                user: process.env.EMAIL_USER, // 您的 Gmail 地址
+                pass: process.env.EMAIL_PASSWORD // 您的 Gmail 應用程式密碼
+            }
+        });
+
+        // 郵件內容
+        const mailOptions = {
+            from: `"樂壓Talks" <${process.env.EMAIL_USER}>`,
+            to: email,
+            subject: '樂壓Talks - 重設密碼',
+            html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                    <div style="background-color: #FAEAD3; padding: 20px; text-align: center;">
+                        <h1 style="color: #8B4513; margin: 0;">樂壓Talks</h1>
+                    </div>
+                    <div style="padding: 30px; background-color: #ffffff;">
+                        <h2 style="color: #333;">您好，${user.nickname || user.username}！</h2>
+                        <p style="color: #666; line-height: 1.6;">
+                            我們收到了您重設密碼的請求。請點擊下方按鈕來重設您的密碼：
+                        </p>
+                        <div style="text-align: center; margin: 30px 0;">
+                            <a href="${resetLink}" 
+                               style="background-color: #8B4513; color: white; padding: 12px 30px; 
+                                      text-decoration: none; border-radius: 5px; display: inline-block;">
+                                重設密碼
+                            </a>
+                        </div>
+                        <p style="color: #666; font-size: 14px; line-height: 1.6;">
+                            或複製以下連結到瀏覽器：<br/>
+                            <a href="${resetLink}" style="color: #8B4513; word-break: break-all;">
+                                ${resetLink}
+                            </a>
+                        </p>
+                        <p style="color: #999; font-size: 12px; margin-top: 30px;">
+                            此連結將在 1 小時後失效。<br/>
+                            如果您沒有請求重設密碼，請忽略此郵件。
+                        </p>
+                    </div>
+                    <div style="background-color: #f5f5f5; padding: 20px; text-align: center; font-size: 12px; color: #999;">
+                        <p>© 2025 樂壓Talks. All rights reserved.</p>
+                        <p>世新大學資訊傳播學系專題作品</p>
+                    </div>
+                </div>
+            `
+        };
+
+        // 發送郵件
+        await transporter.sendMail(mailOptions);
+
+        res.json({ 
+            success: true, 
+            message: '重設密碼連結已發送到您的信箱，請檢查您的郵件' 
+        });
+
+    } catch (err) {
+        console.error('Forgot password error:', err);
+        res.status(500).json({ 
+            success: false, 
+            message: '發送重設連結時發生錯誤，請稍後再試' 
+        });
+    }
+});
+
+// 驗證重設 token
+app.get('/validate-reset-token', async (req, res) => {
+    const { token } = req.query;
+
+    if (!token) {
+        return res.status(400).json({ 
+            success: false, 
+            valid: false,
+            message: '缺少 token' 
+        });
+    }
+
+    try {
+        const query = `
+            SELECT id, username, reset_token_expiry 
+            FROM users 
+            WHERE reset_token = $1
+        `;
+        const result = await client.query(query, [token]);
+
+        if (result.rows.length === 0) {
+            return res.json({ 
+                success: false, 
+                valid: false,
+                message: '無效的重設連結' 
+            });
+        }
+
+        const user = result.rows[0];
+        const now = new Date();
+
+        if (user.reset_token_expiry < now) {
+            return res.json({ 
+                success: false, 
+                valid: false,
+                message: '重設連結已過期' 
+            });
+        }
+
+        res.json({ 
+            success: true, 
+            valid: true,
+            message: 'Token 有效' 
+        });
+
+    } catch (err) {
+        console.error('Validate token error:', err);
+        res.status(500).json({ 
+            success: false, 
+            valid: false,
+            message: '驗證 token 時發生錯誤' 
+        });
+    }
+});
+
+// 重設密碼
+app.post('/reset-password', async (req, res) => {
+    const { token, newPassword } = req.body;
+
+    if (!token || !newPassword) {
+        return res.status(400).json({ 
+            success: false, 
+            message: '缺少必要參數' 
+        });
+    }
+
+    if (newPassword.length < 6) {
+        return res.status(400).json({ 
+            success: false, 
+            message: '密碼長度至少需要 6 個字元' 
+        });
+    }
+
+    try {
+        // 驗證 token
+        const checkQuery = `
+            SELECT id, username, reset_token_expiry 
+            FROM users 
+            WHERE reset_token = $1
+        `;
+        const checkResult = await client.query(checkQuery, [token]);
+
+        if (checkResult.rows.length === 0) {
+            return res.status(400).json({ 
+                success: false, 
+                message: '無效的重設連結' 
+            });
+        }
+
+        const user = checkResult.rows[0];
+        const now = new Date();
+
+        if (user.reset_token_expiry < now) {
+            return res.status(400).json({ 
+                success: false, 
+                message: '重設連結已過期，請重新申請' 
+            });
+        }
+
+        // 更新密碼並清除 token
+        const updateQuery = `
+            UPDATE users 
+            SET password = $1, reset_token = NULL, reset_token_expiry = NULL 
+            WHERE id = $2
+        `;
+        await client.query(updateQuery, [newPassword, user.id]);
+
+        res.json({ 
+            success: true, 
+            message: '密碼重設成功' 
+        });
+
+    } catch (err) {
+        console.error('Reset password error:', err);
+        res.status(500).json({ 
+            success: false, 
+            message: '重設密碼時發生錯誤' 
+        });
+    }
+});
+
 // 啟動伺服器
 app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
