@@ -3,7 +3,7 @@ require('dotenv').config();
 const { injectSpeedInsights } = require('@vercel/speed-insights');
 const express = require('express');
 const cors = require('cors'); // 引入 cors 中間件
-const { Client } = require('pg'); // 引入 pg 客戶端
+const { Pool } = require('pg'); // 改用 Pool 提供更好的並發處理
 const { overlayTextOnImage } = require('./imageProcessor');
 const { uploadToGithub } = require('./githubUploader');
 //https://leya-backend-vercel.vercel.app/posts
@@ -16,20 +16,31 @@ injectSpeedInsights();
 app.use(cors()); // 允許跨域請求
 app.use(express.json()); // 解析 JSON 請求
 
-// 設置 PostgreSQL 連接
-const client = new Client({
+// 設置 PostgreSQL 連線池 (使用 Pool 改善並發性能)
+const pool = new Pool({
     user: 'a111070036',
     host: 'a111070036pg.postgres.database.azure.com',
-    database: 'leya_talks', // 替換為你的資料庫名稱
+    database: 'leya_talks',
     password: '@joke930731',
     port: 5432,
-    ssl: { rejectUnauthorized: false } // 如果需要 SSL 連接
+    ssl: { rejectUnauthorized: false },
+    max: 20, // 最大連線數
+    idleTimeoutMillis: 30000, // 30秒後釋放閒置連線
+    connectionTimeoutMillis: 10000, // 10秒連線超時
+    statement_timeout: 15000, // 15秒 SQL 執行超時
 });
 
-// 連接到資料庫
-client.connect()
-    .then(() => console.log('Connected to PostgreSQL'))
-    .catch(err => console.error('Connection error', err.stack));
+// 監聽連線池事件
+pool.on('connect', () => {
+    console.log('New client connected to PostgreSQL pool');
+});
+
+pool.on('error', (err) => {
+    console.error('Unexpected error on idle client', err);
+});
+
+// 保留 client 變數名稱以兼容現有程式碼
+const client = pool;
 
 // 假設的用戶數據
 const users = [
@@ -113,15 +124,22 @@ app.post('/login', async (req, res) => {
     const { usernameOrEmail, password } = req.body;
     console.log(`Received login request for: ${usernameOrEmail}`);
 
+    // 設定 10 秒超時保護
+    const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Login timeout')), 10000);
+    });
+
     try {
-        // 查詢用戶，檢查 username 或 email
-        const result = await client.query(
+        // 使用 Promise.race 實現超時控制
+        const queryPromise = client.query(
             'SELECT username, nickname, password_hash FROM "users" WHERE username = $1 OR email = $2',
             [usernameOrEmail, usernameOrEmail]
         );
+
+        const result = await Promise.race([queryPromise, timeoutPromise]);
         const user = result.rows[0];
 
-        console.log('Query result:', user); // 添加這行來檢查查詢結果
+        console.log('Query result:', user);
 
         // 檢查用戶是否存在且密碼正確
         if (user && user.password_hash === password) {
@@ -130,8 +148,16 @@ app.post('/login', async (req, res) => {
             return res.status(401).json({ message: '帳號或密碼錯誤' });
         }
     } catch (err) {
-        console.error('Query error', err.stack);
-        return res.status(500).json({ message: '伺服器錯誤' });
+        if (err.message === 'Login timeout') {
+            console.error('Login timeout for:', usernameOrEmail);
+            return res.status(504).json({ 
+                message: '登入請求超時，資料庫連線可能繁忙，請稍後再試或使用訪客模式' 
+            });
+        }
+        console.error('Login query error', err.stack);
+        return res.status(500).json({ 
+            message: '伺服器錯誤，請稍後再試或使用訪客模式' 
+        });
     }
 });
 
