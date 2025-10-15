@@ -557,6 +557,80 @@ app.get('/emotion-image/:emotion', async (req, res) => {
     }
 });
 
+// 一鍵清除聊天記錄 (僅限 shuics)
+app.delete('/chat-history/clear-all', async (req, res) => {
+    const { username } = req.query;
+    
+    if (!username || username !== 'shuics') {
+        return res.status(403).json({ 
+            success: false, 
+            message: '只有訪客模式可以使用清除功能' 
+        });
+    }
+
+    try {
+        // 刪除聊天記錄
+        const chatResult = await client.query(
+            'DELETE FROM chat_history WHERE username = $1',
+            [username]
+        );
+        
+        // 刪除相關圖片記錄
+        const imageResult = await client.query(
+            'DELETE FROM user_chat_image WHERE username = $1',
+            [username]
+        );
+
+        console.log(`[ClearAll] 已清除 ${username} 的 ${chatResult.rowCount} 條聊天記錄和 ${imageResult.rowCount} 張圖片`);
+
+        res.json({ 
+            success: true, 
+            message: '已清除所有聊天記錄',
+            deletedChats: chatResult.rowCount,
+            deletedImages: imageResult.rowCount
+        });
+    } catch (err) {
+        console.error('Clear all chat history error:', err.stack);
+        res.status(500).json({ 
+            success: false, 
+            message: '清除失敗，請稍後再試' 
+        });
+    }
+});
+
+// 一鍵清除心情日記 (僅限 shuics)
+app.delete('/mood-journal/clear-all', async (req, res) => {
+    const { username } = req.query;
+    
+    if (!username || username !== 'shuics') {
+        return res.status(403).json({ 
+            success: false, 
+            message: '只有訪客模式可以使用清除功能' 
+        });
+    }
+
+    try {
+        const result = await client.query(
+            'DELETE FROM mood_history WHERE username = $1',
+            [username]
+        );
+
+        console.log(`[ClearAll] 已清除 ${username} 的 ${result.rowCount} 條心情日記`);
+
+        res.json({ 
+            success: true, 
+            message: '已清除所有心情日記',
+            deletedCount: result.rowCount
+        });
+    } catch (err) {
+        console.error('Clear all mood journal error:', err.stack);
+        res.status(500).json({ 
+            success: false, 
+            message: '清除失敗，請稍後再試' 
+        });
+    }
+});
+
 // 產生放鬆小訣竅（使用 OpenAI）
 app.get('/relax-tips', async (req, res) => {
     try {
