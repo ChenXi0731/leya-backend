@@ -1189,7 +1189,7 @@ app.post('/reset-password', async (req, res) => {
         // 更新密碼並清除 token
         const updateQuery = `
             UPDATE users 
-            SET password = $1, reset_token = NULL, reset_token_expiry = NULL 
+            SET password_hash = $1, reset_token = NULL, reset_token_expiry = NULL 
             WHERE id = $2
         `;
         await client.query(updateQuery, [newPassword, user.id]);
