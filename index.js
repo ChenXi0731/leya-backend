@@ -15,6 +15,9 @@ const PORT = process.env.PORT || 3000;
 injectSpeedInsights();
 
 // 中間件
+// 部署在反向代理（如 Vercel/NGINX）後方時，需信任代理以正確取得使用者 IP
+// 並避免 express-rate-limit 在偵測 X-Forwarded-For 時拋出驗證錯誤
+app.set('trust proxy', true);
 app.use(cors()); // 允許跨域請求
 app.use(express.json()); // 解析 JSON 請求
 
