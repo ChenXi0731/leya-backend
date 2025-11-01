@@ -17,7 +17,8 @@ injectSpeedInsights();
 // 中間件
 // 部署在反向代理（如 Vercel/NGINX）後方時，需信任代理以正確取得使用者 IP
 // 並避免 express-rate-limit 在偵測 X-Forwarded-For 時拋出驗證錯誤
-app.set('trust proxy', true);
+// 請僅信任最接近的 1 層代理（例如 Vercel/NGINX 前的一層），避免過度寬鬆的 true 設定
+app.set('trust proxy', 1);
 app.use(cors()); // 允許跨域請求
 app.use(express.json()); // 解析 JSON 請求
 
