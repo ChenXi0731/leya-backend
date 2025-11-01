@@ -1,8 +1,10 @@
-require('dotenv').config();
+require('dotenv').config({ override: true });
 
 const { injectSpeedInsights } = require('@vercel/speed-insights');
 const express = require('express');
 const cors = require('cors'); // 引入 cors 中間件
+const rateLimit = require('express-rate-limit');
+const OpenAI = require('openai');
 const { Pool } = require('pg'); // 改用 Pool 提供更好的並發處理
 const { overlayTextOnImage } = require('./imageProcessor');
 const { uploadToGithub } = require('./githubUploader');
@@ -15,6 +17,62 @@ injectSpeedInsights();
 // 中間件
 app.use(cors()); // 允許跨域請求
 app.use(express.json()); // 解析 JSON 請求
+
+// 僅針對 /chat 設定速率限制（避免瞬間觸發 OpenAI 限流）
+const chatLimiter = rateLimit({
+    windowMs: 60_000, // 1 分鐘視窗
+    max: 30,          // 每 IP 每分鐘最多 30 次
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+app.use('/chat', chatLimiter);
+
+// OpenAI client（採用 SDK）
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+
+// 用記憶體暫存簡易上下文（注意：在無狀態平台會是暫時性的）
+const memory = new Map();
+
+// 系統提示與結構化規範
+const SYSTEM_PROMPT = `
+你現在是一位溫柔的心理諮詢師，請用繁體中文回覆，並以 JSON 格式輸出以下欄位：
+- reply
+- encouragement
+- emotion（只能：快樂、悲傷、焦慮、生氣、壓力、內耗、孤單、迷惘、希望、平靜）
+`.trim();
+
+const ALLOWED_EMOTIONS = ['快樂', '悲傷', '焦慮', '生氣', '壓力', '內耗', '孤單', '迷惘', '希望', '平靜'];
+function coerceModelJson(text) {
+    const match = text.match(/\{[\s\S]*\}/);
+    const raw = match ? match[0] : text;
+    let data; try { data = JSON.parse(raw); } catch { data = {}; }
+    return {
+        reply: typeof data.reply === 'string' ? data.reply : '',
+        encouragement: typeof data.encouragement === 'string' ? data.encouragement : '',
+        emotion: ALLOWED_EMOTIONS.includes(data.emotion) ? data.emotion : '平靜',
+    };
+}
+
+// 簡易延遲/重試工具（指數退避 + 抖動）
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function withRetries(fn, { retries = 2, base = 500 } = {}) {
+    let lastErr;
+    for (let i = 0; i <= retries; i++) {
+        try {
+            return await fn();
+        } catch (err) {
+            lastErr = err;
+            // 僅對暫時性錯誤嘗試重試
+            if (err?.status === 429 || err?.status === 500 || err?.code === 'ETIMEDOUT') {
+                const backoff = base * Math.pow(2, i) + Math.floor(Math.random() * 200);
+                await sleep(backoff);
+                continue;
+            }
+            break; // 其他錯誤不重試
+        }
+    }
+    throw lastErr;
+}
 
 // 設置 PostgreSQL 連線池 (使用 Pool 改善並發性能)
 const pool = new Pool({
@@ -278,39 +336,137 @@ app.delete('/posts/:id', async (req, res) => {
 });
 
 
-//聊天功能
+// 聊天功能（改為直接呼叫 OpenAI，取代外接 n8n）
 app.post('/chat', async (req, res) => {
-    const webhookUrl = "https://yu0402-n8n-free.hf.space/webhook/chat";
-    const { message, userId } = req.body;
-
-    if (!message) {
-        return res.status(400).json({ message: '缺少 message 參數' });
-    }
-
     try {
-        const response = await fetch(webhookUrl, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                message,
-                userId: userId || "demo-visitor"
-            })
-        });
+        const { userId, message } = req.body || {};
+        if (!userId) return res.status(400).json({ error: '缺少 userId' });
+        if (!message) return res.status(400).json({ error: '缺少 message' });
 
-        const data = await response.json();
-        const replyData = data[0]?.output || {};
-        const reply = {
-            reply: replyData.reply || "🤖 沒有回應",
-            encouragement: replyData.encouragement || "",
-            emotion: replyData.emotion || "未知"
-        };
-        res.json(reply);
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: "伺服器錯誤，請稍後再試。" });
+        // 目前使用單輪（可切換為多輪：取歷史最後 10 則）
+        // const hist = memory.get(userId) || [];
+        // const last10 = hist.slice(-10);
+        // const messages = [
+        //   { role: 'system', content: SYSTEM_PROMPT },
+        //   ...last10,
+        //   { role: 'user', content: message },
+        // ];
+
+        const messages = [
+            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'user', content: message },
+        ];
+
+        let completion;
+        try {
+            completion = await withRetries(() => openai.chat.completions.create({
+                model: 'gpt-4o-mini',
+                temperature: 0.7,
+                max_tokens: 300,
+                messages,
+            }));
+        } catch (err) {
+            // 429：額度/速率限制
+            if (err?.status === 429) {
+                const retryAfter = Number(err?.headers?.get?.('retry-after') ?? 0) || undefined;
+                return res.status(429).json({
+                    error: '目前已達到模型的速率限制或當前專案額度不足，請稍後再試。',
+                    code: 'openai_rate_limit',
+                    retryAfter,
+                });
+            }
+            // 401：API Key 問題
+            if (err?.status === 401) {
+                return res.status(401).json({ error: 'OpenAI 認證失敗，請確認 API Key 或專案設定。', code: 'openai_auth' });
+            }
+            throw err;
+        }
+
+        const text = completion.choices?.[0]?.message?.content ?? '';
+        const structured = coerceModelJson(text);
+
+        // 可啟用多輪：
+        // const newHist = [...last10, { role: 'user', content: message }, { role: 'assistant', content: structured.reply }];
+        // memory.set(userId, newHist);
+
+        return res.status(200).json(structured);
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ error: '內部伺服器錯誤', detail: String(err?.message || err) });
     }
 });
 
+// 聊天串流（SSE）：逐步傳回 reply，結束時送出 final 事件附完整 JSON
+app.get('/chat/stream', async (req, res) => {
+    try {
+        const userId = req.query.userId;
+        const message = req.query.message;
+
+        // 先回應 header 以建立 SSE 連線
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+
+        // 基本驗證
+        if (!userId) {
+            res.write(`event: error\ndata: ${JSON.stringify({ error: '缺少 userId' })}\n\n`);
+            return res.end();
+        }
+        if (!message) {
+            res.write(`event: error\ndata: ${JSON.stringify({ error: '缺少 message' })}\n\n`);
+            return res.end();
+        }
+
+        // 初始心跳，避免代理快取
+        res.write(`event: ping\ndata: "ready"\n\n`);
+
+        const messages = [
+            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'user', content: String(message) },
+        ];
+
+        let fullText = '';
+        try {
+            const stream = await openai.chat.completions.create({
+                model: 'gpt-4o-mini',
+                temperature: 0.7,
+                max_tokens: 300,
+                messages,
+                stream: true,
+            });
+
+            for await (const chunk of stream) {
+                const delta = chunk?.choices?.[0]?.delta?.content || '';
+                if (delta) {
+                    fullText += delta;
+                    res.write(`event: chunk\ndata: ${JSON.stringify({ delta })}\n\n`);
+                }
+            }
+        } catch (err) {
+            if (err?.status === 429) {
+                res.write(`event: error\ndata: ${JSON.stringify({ error: '速率限制或額度不足', code: 'openai_rate_limit' })}\n\n`);
+                return res.end();
+            }
+            if (err?.status === 401) {
+                res.write(`event: error\ndata: ${JSON.stringify({ error: 'OpenAI 認證失敗', code: 'openai_auth' })}\n\n`);
+                return res.end();
+            }
+            console.error('SSE stream error:', err);
+            res.write(`event: error\ndata: ${JSON.stringify({ error: '伺服器錯誤' })}\n\n`);
+            return res.end();
+        }
+
+        const structured = coerceModelJson(fullText);
+        res.write(`event: final\ndata: ${JSON.stringify(structured)}\n\n`);
+        return res.end();
+    } catch (err) {
+        console.error('SSE outer error:', err);
+        try {
+            res.write(`event: error\ndata: ${JSON.stringify({ error: '內部伺服器錯誤' })}\n\n`);
+        } catch {}
+        return res.end();
+    }
+});
 //儲存聊天訊息
 app.post('/chat-history', async (req, res) => {
     const { username, user_message, bot_message, encourage_text, emotion } = req.body;
