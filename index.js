@@ -429,28 +429,21 @@ app.get('/chat/stream', async (req, res) => {
         // 初始心跳，避免代理快取
         res.write(`event: ping\ndata: "ready"\n\n`);
 
-        const messages = [
+        // 先非串流取得完整回覆，再以固定節奏（0.2秒/字）推送到前端
+        const genMessages = [
             { role: 'system', content: STREAM_PROMPT },
             { role: 'user', content: String(message) },
         ];
 
         let fullText = '';
         try {
-            const stream = await openai.chat.completions.create({
+            const completion = await withRetries(() => openai.chat.completions.create({
                 model: 'gpt-4o-mini',
                 temperature: 0.7,
                 max_tokens: 300,
-                messages,
-                stream: true,
-            });
-
-            for await (const chunk of stream) {
-                const delta = chunk?.choices?.[0]?.delta?.content || '';
-                if (delta) {
-                    fullText += delta;
-                    res.write(`event: chunk\ndata: ${JSON.stringify({ delta })}\n\n`);
-                }
-            }
+                messages: genMessages,
+            }));
+            fullText = completion.choices?.[0]?.message?.content || '';
         } catch (err) {
             if (err?.status === 429) {
                 res.write(`event: error\ndata: ${JSON.stringify({ error: '速率限制或額度不足', code: 'openai_rate_limit' })}\n\n`);
@@ -460,8 +453,25 @@ app.get('/chat/stream', async (req, res) => {
                 res.write(`event: error\ndata: ${JSON.stringify({ error: 'OpenAI 認證失敗', code: 'openai_auth' })}\n\n`);
                 return res.end();
             }
-            console.error('SSE stream error:', err);
+            console.error('SSE generate error:', err);
             res.write(`event: error\ndata: ${JSON.stringify({ error: '伺服器錯誤' })}\n\n`);
+            return res.end();
+        }
+
+        // 若客戶端中斷，停止推送並結束
+        let aborted = false;
+        req.on('close', () => { aborted = true; });
+
+        // 以固定速度（每 200ms 一個字）推送回覆
+        try {
+            for (const ch of fullText) {
+                if (aborted) return; // 客戶端已關閉
+                res.write(`event: chunk\ndata: ${JSON.stringify({ delta: ch })}\n\n`);
+                await sleep(200);
+            }
+        } catch (pushErr) {
+            console.error('SSE push error:', pushErr);
+            // 不回傳 error 事件以避免覆蓋既有內容，直接結束
             return res.end();
         }
 
@@ -473,8 +483,8 @@ app.get('/chat/stream', async (req, res) => {
                 temperature: 0.5,
                 max_tokens: 150,
                 messages: [
-                    { role: 'system', content: '你會根據對話產生鼓勵語與判斷情緒，請只輸出 JSON 物件，僅包含 encouragement 與 emotion 兩個欄位。emotion 只能是：快樂、悲傷、焦慮、生氣、壓力、內耗、孤單、迷惘、希望、平靜。' },
-                    { role: 'user', content: `使用者訊息：${String(message)}\n你的回覆：${fullText}\n請回傳 JSON：{"encouragement":"...","emotion":"..."}` }
+                    { role: 'system', content: '你會針對使用者提供的一段回覆文字，判斷其中流露的情緒並給出一句鼓勵話。請只輸出 JSON 物件，僅包含 encouragement 與 emotion 兩個欄位。emotion 只能是：快樂、悲傷、焦慮, 生氣, 壓力, 內耗, 孤單, 迷惘, 希望, 平靜。' },
+                    { role: 'user', content: `${fullText}` },
                 ],
             }));
             const enrichText = enrich.choices?.[0]?.message?.content || '';
