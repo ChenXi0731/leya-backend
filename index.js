@@ -44,6 +44,12 @@ const SYSTEM_PROMPT = `
 - emotion（只能：快樂、悲傷、焦慮、生氣、壓力、內耗、孤單、迷惘、希望、平靜）
 `.trim();
 
+// 串流用提示：只輸出「回覆文字本身」，不含任何 JSON/欄位名稱/前綴，避免前端畫面出現 JSON
+const STREAM_PROMPT = `
+你現在是一位溫柔的心理諮詢師，請用繁體中文回覆使用者，
+只輸出回覆的正文內容（純文字），不要輸出 JSON、不要包含欄位名稱或任何前綴。
+`.trim();
+
 const ALLOWED_EMOTIONS = ['快樂', '悲傷', '焦慮', '生氣', '壓力', '內耗', '孤單', '迷惘', '希望', '平靜'];
 function coerceModelJson(text) {
     const match = text.match(/\{[\s\S]*\}/);
@@ -424,7 +430,7 @@ app.get('/chat/stream', async (req, res) => {
         res.write(`event: ping\ndata: "ready"\n\n`);
 
         const messages = [
-            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'system', content: STREAM_PROMPT },
             { role: 'user', content: String(message) },
         ];
 
@@ -459,7 +465,26 @@ app.get('/chat/stream', async (req, res) => {
             return res.end();
         }
 
-        const structured = coerceModelJson(fullText);
+        // 串流完成後，補齊 encouragement / emotion（以第二次輕量模型推論），final 僅送一次結構化 JSON
+        let structured = { reply: fullText, encouragement: '', emotion: '平靜' };
+        try {
+            const enrich = await withRetries(() => openai.chat.completions.create({
+                model: 'gpt-4o-mini',
+                temperature: 0.5,
+                max_tokens: 150,
+                messages: [
+                    { role: 'system', content: '你會根據對話產生鼓勵語與判斷情緒，請只輸出 JSON 物件，僅包含 encouragement 與 emotion 兩個欄位。emotion 只能是：快樂、悲傷、焦慮、生氣、壓力、內耗、孤單、迷惘、希望、平靜。' },
+                    { role: 'user', content: `使用者訊息：${String(message)}\n你的回覆：${fullText}\n請回傳 JSON：{"encouragement":"...","emotion":"..."}` }
+                ],
+            }));
+            const enrichText = enrich.choices?.[0]?.message?.content || '';
+            const coerced = coerceModelJson(enrichText);
+            structured.encouragement = coerced.encouragement;
+            structured.emotion = coerced.emotion;
+        } catch (e) {
+            // 若補齊失敗，維持預設 encouragement/emotion
+            console.error('enrich error:', e);
+        }
         res.write(`event: final\ndata: ${JSON.stringify(structured)}\n\n`);
         return res.end();
     } catch (err) {
