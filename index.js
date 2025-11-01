@@ -430,22 +430,43 @@ app.get('/chat/stream', async (req, res) => {
         // 初始心跳，避免代理快取
         res.write(`event: ping\ndata: "ready"\n\n`);
 
-        // 先非串流取得完整回覆，再以固定節奏（0.2秒/字）推送到前端
+        // 使用 OpenAI 串流直接輸出，後端不做人為節流；前端自行以固定字速顯示
         const genMessages = [
             { role: 'system', content: STREAM_PROMPT },
             { role: 'user', content: String(message) },
         ];
 
+        const abortController = new AbortController();
         let fullText = '';
+
+        // 客戶端關閉則中止與 OpenAI 的串流請求
+        req.on('close', () => {
+            try { abortController.abort(); } catch {}
+        });
+
         try {
-            const completion = await withRetries(() => openai.chat.completions.create({
-                model: 'gpt-4o-mini',
-                temperature: 0.7,
-                max_tokens: 300,
-                messages: genMessages,
-            }));
-            fullText = completion.choices?.[0]?.message?.content || '';
+            const stream = await openai.chat.completions.create(
+                {
+                    model: 'gpt-4o-mini',
+                    temperature: 0.7,
+                    max_tokens: 300,
+                    messages: genMessages,
+                    stream: true,
+                },
+                { signal: abortController.signal }
+            );
+
+            for await (const part of stream) {
+                const delta = part?.choices?.[0]?.delta?.content;
+                if (!delta) continue;
+                fullText += delta;
+                res.write(`event: chunk\ndata: ${JSON.stringify({ delta })}\n\n`);
+            }
         } catch (err) {
+            if (err?.name === 'AbortError') {
+                // 客戶端中止，不再回任何事件
+                return res.end();
+            }
             if (err?.status === 429) {
                 res.write(`event: error\ndata: ${JSON.stringify({ error: '速率限制或額度不足', code: 'openai_rate_limit' })}\n\n`);
                 return res.end();
@@ -454,25 +475,8 @@ app.get('/chat/stream', async (req, res) => {
                 res.write(`event: error\ndata: ${JSON.stringify({ error: 'OpenAI 認證失敗', code: 'openai_auth' })}\n\n`);
                 return res.end();
             }
-            console.error('SSE generate error:', err);
+            console.error('SSE streaming error:', err);
             res.write(`event: error\ndata: ${JSON.stringify({ error: '伺服器錯誤' })}\n\n`);
-            return res.end();
-        }
-
-        // 若客戶端中斷，停止推送並結束
-        let aborted = false;
-        req.on('close', () => { aborted = true; });
-
-        // 以固定速度（每 200ms 一個字）推送回覆
-        try {
-            for (const ch of fullText) {
-                if (aborted) return; // 客戶端已關閉
-                res.write(`event: chunk\ndata: ${JSON.stringify({ delta: ch })}\n\n`);
-                await sleep(200);
-            }
-        } catch (pushErr) {
-            console.error('SSE push error:', pushErr);
-            // 不回傳 error 事件以避免覆蓋既有內容，直接結束
             return res.end();
         }
 
