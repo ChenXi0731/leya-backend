@@ -462,6 +462,23 @@ app.get('/chat/stream', async (req, res) => {
                 fullText += delta;
                 res.write(`event: chunk\ndata: ${JSON.stringify({ delta })}\n\n`);
             }
+            // 萬一串流未回任何 token（平台/代理緩衝或模型行為），以非串流作為後援，至少保證有文字
+            if (!fullText || !fullText.trim()) {
+                try {
+                    const fallback = await withRetries(() => openai.chat.completions.create({
+                        model: 'gpt-4o-mini',
+                        temperature: 0.7,
+                        max_tokens: 300,
+                        messages: genMessages,
+                    }));
+                    fullText = fallback.choices?.[0]?.message?.content || '';
+                    if (fullText) {
+                        res.write(`event: chunk\ndata: ${JSON.stringify({ delta: fullText })}\n\n`);
+                    }
+                } catch (fbErr) {
+                    console.error('SSE streaming empty, fallback failed:', fbErr);
+                }
+            }
         } catch (err) {
             if (err?.name === 'AbortError') {
                 // 客戶端中止，不再回任何事件
