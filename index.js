@@ -408,124 +408,8 @@ app.post('/chat', async (req, res) => {
 
 // 聊天串流（SSE）：逐步傳回 reply，結束時送出 final 事件附完整 JSON
 app.get('/chat/stream', async (req, res) => {
-    try {
-        const userId = req.query.userId;
-        const message = req.query.message;
-
-        // 先回應 header 以建立 SSE 連線
-        res.setHeader('Content-Type', 'text/event-stream');
-        res.setHeader('Cache-Control', 'no-cache');
-        res.setHeader('Connection', 'keep-alive');
-
-        // 基本驗證
-        if (!userId) {
-            res.write(`event: error\ndata: ${JSON.stringify({ error: '缺少 userId' })}\n\n`);
-            return res.end();
-        }
-        if (!message) {
-            res.write(`event: error\ndata: ${JSON.stringify({ error: '缺少 message' })}\n\n`);
-            return res.end();
-        }
-
-        // 初始心跳，避免代理快取
-        res.write(`event: ping\ndata: "ready"\n\n`);
-
-        // 使用 OpenAI 串流直接輸出，後端不做人為節流；前端自行以固定字速顯示
-        const genMessages = [
-            { role: 'system', content: STREAM_PROMPT },
-            { role: 'user', content: String(message) },
-        ];
-
-        const abortController = new AbortController();
-        let fullText = '';
-
-        // 客戶端關閉則中止與 OpenAI 的串流請求
-        req.on('close', () => {
-            try { abortController.abort(); } catch {}
-        });
-
-        try {
-            const stream = await openai.chat.completions.create(
-                {
-                    model: 'gpt-4o-mini',
-                    temperature: 0.7,
-                    max_tokens: 300,
-                    messages: genMessages,
-                    stream: true,
-                },
-                { signal: abortController.signal }
-            );
-
-            for await (const part of stream) {
-                const delta = part?.choices?.[0]?.delta?.content;
-                if (!delta) continue;
-                fullText += delta;
-                res.write(`event: chunk\ndata: ${JSON.stringify({ delta })}\n\n`);
-            }
-            // 萬一串流未回任何 token（平台/代理緩衝或模型行為），以非串流作為後援，至少保證有文字
-            if (!fullText || !fullText.trim()) {
-                try {
-                    const fallback = await withRetries(() => openai.chat.completions.create({
-                        model: 'gpt-4o-mini',
-                        temperature: 0.7,
-                        max_tokens: 300,
-                        messages: genMessages,
-                    }));
-                    fullText = fallback.choices?.[0]?.message?.content || '';
-                    if (fullText) {
-                        res.write(`event: chunk\ndata: ${JSON.stringify({ delta: fullText })}\n\n`);
-                    }
-                } catch (fbErr) {
-                    console.error('SSE streaming empty, fallback failed:', fbErr);
-                }
-            }
-        } catch (err) {
-            if (err?.name === 'AbortError') {
-                // 客戶端中止，不再回任何事件
-                return res.end();
-            }
-            if (err?.status === 429) {
-                res.write(`event: error\ndata: ${JSON.stringify({ error: '速率限制或額度不足', code: 'openai_rate_limit' })}\n\n`);
-                return res.end();
-            }
-            if (err?.status === 401) {
-                res.write(`event: error\ndata: ${JSON.stringify({ error: 'OpenAI 認證失敗', code: 'openai_auth' })}\n\n`);
-                return res.end();
-            }
-            console.error('SSE streaming error:', err);
-            res.write(`event: error\ndata: ${JSON.stringify({ error: '伺服器錯誤' })}\n\n`);
-            return res.end();
-        }
-
-        // 串流完成後，補齊 encouragement / emotion（以第二次輕量模型推論），final 僅送一次結構化 JSON
-        let structured = { reply: fullText, encouragement: '', emotion: '平靜' };
-        try {
-            const enrich = await withRetries(() => openai.chat.completions.create({
-                model: 'gpt-4o-mini',
-                temperature: 0.5,
-                max_tokens: 150,
-                messages: [
-                    { role: 'system', content: '你會針對使用者提供的一段回覆文字，判斷其中流露的情緒並給出一句鼓勵話。請只輸出 JSON 物件，僅包含 encouragement 與 emotion 兩個欄位。emotion 只能是：快樂、悲傷、焦慮, 生氣, 壓力, 內耗, 孤單, 迷惘, 希望, 平靜。' },
-                    { role: 'user', content: `${fullText}` },
-                ],
-            }));
-            const enrichText = enrich.choices?.[0]?.message?.content || '';
-            const coerced = coerceModelJson(enrichText);
-            structured.encouragement = coerced.encouragement;
-            structured.emotion = coerced.emotion;
-        } catch (e) {
-            // 若補齊失敗，維持預設 encouragement/emotion
-            console.error('enrich error:', e);
-        }
-        res.write(`event: final\ndata: ${JSON.stringify(structured)}\n\n`);
-        return res.end();
-    } catch (err) {
-        console.error('SSE outer error:', err);
-        try {
-            res.write(`event: error\ndata: ${JSON.stringify({ error: '內部伺服器錯誤' })}\n\n`);
-        } catch {}
-        return res.end();
-    }
+    // 串流顯示已停用，改用一次性 /chat
+    return res.status(410).json({ error: 'Streaming disabled. Please use POST /chat instead.' });
 });
 //儲存聊天訊息
 app.post('/chat-history', async (req, res) => {
@@ -1248,6 +1132,35 @@ app.get('/emotion-analysis/history', async (req, res) => {
             success: false, 
             message: '伺服器錯誤，無法取得壓力分析歷史記錄' 
         });
+    }
+});
+
+// 取得用戶的資料筆數總和（聊天 + 心情日記）
+app.get('/user-data-count', async (req, res) => {
+    const { username } = req.query;
+
+    if (!username) {
+        return res.status(400).json({ success: false, message: '缺少 username 參數' });
+    }
+
+    try {
+        // 並行查詢提升效能
+        const [chatCountResult, moodCountResult] = await Promise.all([
+            client.query('SELECT COUNT(*)::int AS count FROM chat_history WHERE username = $1', [username]),
+            client.query('SELECT COUNT(*)::int AS count FROM mood_history WHERE username = $1', [username])
+        ]);
+
+        const chat = chatCountResult.rows[0]?.count ?? 0;
+        const mood = moodCountResult.rows[0]?.count ?? 0;
+        const total = chat + mood;
+
+        return res.json({
+            success: true,
+            counts: { chat, mood, total }
+        });
+    } catch (err) {
+        console.error('Fetch user data count error:', err.stack || err);
+        return res.status(500).json({ success: false, message: '伺服器錯誤，無法取得資料筆數' });
     }
 });
 
