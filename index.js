@@ -362,8 +362,39 @@ app.post('/chat', async (req, res) => {
         //   { role: 'user', content: message },
         // ];
 
+        // 記憶鏈：取得聊天紀錄
+        let historyMessages = [];
+        try{
+            const sql = 'SELECT user_message, bot_message, encourage_text, emotion FROM chat_history WHERE username = $1 ORDER BY created_time DESC LIMIT $2';
+            const maxNum = 6;
+
+            const historyResult = await client.query(sql, [userId, maxNum]);
+
+            const rows = historyResult.rows.reverse();
+
+            rows.forEach(row => {
+                if (row.user_message) {
+                    historyMessages.push({ role: 'user', content: row.user_message });
+                }
+                if (row.bot_message) {
+                    // 為了讓模型保持輸出 JSON 格式，這裡將歷史紀錄還原為 JSON 字串
+                    // 這樣模型會看到自己過去也是輸出 JSON，有助於維持格式穩定
+                    const assistantContent = JSON.stringify({
+                        reply: row.bot_message,
+                        encouragement: row.encourage_text || '',
+                        emotion: row.emotion || '平靜'
+                    });
+                    historyMessages.push({ role: 'assistant', content: assistantContent });
+                }
+            });
+
+        }catch(dbErr){
+            console.error('讀取歷史紀錄失敗：', dbErr);
+        }
+
         const messages = [
             { role: 'system', content: SYSTEM_PROMPT },
+            ...historyMessages,
             { role: 'user', content: message },
         ];
 
