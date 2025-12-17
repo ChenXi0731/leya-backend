@@ -1027,8 +1027,10 @@ ${moodSummary}
       "emotion": "焦慮",
       "impact": "失眠、暴飲暴食",
       "note": "我必須科科拿滿分，否則就是個失敗者",
-      "is_resolved": false,
-      "current_stress": 100
+      "is_resolved": true,
+      "current_stress": 30,
+      "user_dispute": "失敗一次不代表我是魯蛇",
+      "new_belief": "我希望能考好，但沒考好下次再努力就好"
     }
   ]
 }
@@ -1036,16 +1038,17 @@ ${moodSummary}
 欄位填寫要求 (對應 REBT 模型)：
 1. category (分類)：使用繁體中文，如學業、人際、家庭、財務、健康、未來、自我價值。
 2. source (A - 促發事件)：客觀發生的事件。
-3. emotion (C - 情緒後果)：感受到的情緒。
+3. emotion (C - 情緒後果)：【重要】請填寫「原始的負面情緒」（如焦慮、憤怒），即使該事件已解決，也不要填寫「希望」或「平靜」，以維持 ABC 因果邏輯的連貫性。
 4. impact (C - 行為/生理後果)：行為反應或生理影響。
 5. note (B - 信念)：偵測使用者潛在的「非理性信念」。
-6. is_resolved (Boolean - 關鍵)：請仔細檢查對話紀錄，若使用者曾明確表示「已經解決」、「轉念成功」或有進行 REBT 練習且結果正向（例如：「我現在覺得好多了」、「我發現原本的想法不合理」），請填 true，否則填 false。
+6. is_resolved (Boolean)：若使用者曾明確表示「已經解決」或有進行 REBT 練習且結果正向，請填 true，否則填 false。
 7. current_stress (Int)：若 is_resolved 為 true，請填 30；若為 false，請填 100。
+8. user_dispute (D - 駁斥)：若 is_resolved 為 true，請從紀錄中提取使用者是如何「反駁」舊信念的；若無則留空。
+9. new_belief (E - 新觀點)：若 is_resolved 為 true，請從紀錄中提取使用者建立的「新信念」；若無則留空。
 
 整體要求：
 1. 回傳包含 analysis 陣列的 JSON 物件。
-2. 根據實際記錄內容分析，回傳 3-8 條記錄。
-3. 若沒有明顯的非理性信念，note 欄位可描述使用者對該事件的解讀。`;
+2. 根據實際記錄內容分析，回傳 3-8 條記錄。`;
 
         // 4. 呼叫 OpenAI API
         const resp = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -1119,12 +1122,13 @@ ${moodSummary}
 
         for (const item of analysisResults) {
             try {
+                // ★ 修改：加入 user_dispute 和 new_belief 欄位
                 const result = await client.query(
                     `INSERT INTO emotion_analysis (
                         username, category, source, impact, emotion, note, created_at, 
-                        is_resolved, current_stress
+                        is_resolved, current_stress, user_dispute, new_belief
                     ) 
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) 
                      RETURNING *`,
                     [
                         username,
@@ -1134,10 +1138,11 @@ ${moodSummary}
                         item.emotion || null,
                         item.note || null,
                         batchTimestamp,
-                        // 這是第 8 個參數
                         item.is_resolved === true ? true : false,
-                        // 這是第 9 個參數
-                        item.current_stress || 100
+                        item.current_stress || 100,
+                        // ★ 新增這兩個參數
+                        item.user_dispute || null,
+                        item.new_belief || null
                     ]
                 );
                 insertedRecords.push(result.rows[0]);
