@@ -43,6 +43,7 @@ const SYSTEM_PROMPT = `
 - reply
 - encouragement
 - emotion（只能：快樂、悲傷、焦慮、生氣、壓力、內耗、孤單、迷惘、希望、平靜）
+- recommendation（選填，若判斷需要推薦網站功能，請輸出功能名稱，只能是：冥想、正念、心理資源地圖、紓壓小遊戲、心情日記、壓力心智圖。若不需要則留空）
 `.trim();
 
 // 串流用提示：只輸出「回覆文字本身」，不含任何 JSON/欄位名稱/前綴，避免前端畫面出現 JSON
@@ -52,6 +53,8 @@ const STREAM_PROMPT = `
 `.trim();
 
 const ALLOWED_EMOTIONS = ['快樂', '悲傷', '焦慮', '生氣', '壓力', '內耗', '孤單', '迷惘', '希望', '平靜'];
+const ALLOWED_RECOMMENDATIONS = ['冥想', '正念', '心理資源地圖', '紓壓小遊戲', '心情日記', '壓力心智圖'];
+
 function coerceModelJson(text) {
     const match = text.match(/\{[\s\S]*\}/);
     const raw = match ? match[0] : text;
@@ -60,6 +63,7 @@ function coerceModelJson(text) {
         reply: typeof data.reply === 'string' ? data.reply : '',
         encouragement: typeof data.encouragement === 'string' ? data.encouragement : '',
         emotion: ALLOWED_EMOTIONS.includes(data.emotion) ? data.emotion : '平靜',
+        recommendation: ALLOWED_RECOMMENDATIONS.includes(data.recommendation) ? data.recommendation : '',
     };
 }
 
@@ -365,7 +369,7 @@ app.post('/chat', async (req, res) => {
         // 記憶鏈：取得聊天紀錄
         let historyMessages = [];
         try {
-            const sql = 'SELECT user_message, bot_message, encourage_text, emotion FROM chat_history WHERE username = $1 ORDER BY created_time DESC LIMIT $2';
+            const sql = 'SELECT user_message, bot_message, encourage_text, emotion, recommendation FROM chat_history WHERE username = $1 ORDER BY created_time DESC LIMIT $2';
             const maxNum = 6;
 
             const historyResult = await client.query(sql, [userId, maxNum]);
@@ -382,7 +386,8 @@ app.post('/chat', async (req, res) => {
                     const assistantContent = JSON.stringify({
                         reply: row.bot_message,
                         encouragement: row.encourage_text || '',
-                        emotion: row.emotion || '平靜'
+                        emotion: row.emotion || '平靜',
+                        recommendation: row.recommendation || ''
                     });
                     historyMessages.push({ role: 'assistant', content: assistantContent });
                 }
@@ -444,17 +449,17 @@ app.get('/chat/stream', async (req, res) => {
 });
 //儲存聊天訊息
 app.post('/chat-history', async (req, res) => {
-    const { username, user_message, bot_message, encourage_text, emotion } = req.body;
+    const { username, user_message, bot_message, encourage_text, emotion, recommendation } = req.body;
     if (!username || !user_message || !bot_message) {
         return res.status(400).json({ message: '缺少必要欄位' });
     }
     try {
         // 1. 儲存聊天記錄到 chat_history 表 (這是您已有的邏輯)
         const insertResult = await client.query(
-            `INSERT INTO chat_history (username, user_message, bot_message, encourage_text, emotion)
-             VALUES ($1, $2, $3, $4, $5)
+            `INSERT INTO chat_history (username, user_message, bot_message, encourage_text, emotion, recommendation)
+             VALUES ($1, $2, $3, $4, $5, $6)
              RETURNING id`,
-            [username, user_message, bot_message, encourage_text, emotion]
+            [username, user_message, bot_message, encourage_text, emotion, recommendation]
         );
         const chatHistoryId = insertResult.rows[0].id;
         console.log(`[ChatHistory] 聊天記錄已儲存至資料庫: user=${username}`);
@@ -571,7 +576,7 @@ app.get('/chat-history', async (req, res) => {
     }
     try {
         const result = await client.query(
-            `SELECT ch.user_message, ch.bot_message, ch.encourage_text, ch.emotion, ch.created_time, uci.image_url
+            `SELECT ch.user_message, ch.bot_message, ch.encourage_text, ch.emotion, ch.recommendation, ch.created_time, uci.image_url
              FROM chat_history ch
              LEFT JOIN user_chat_image uci ON ch.id = uci.chat_history_id
              WHERE ch.username = $1
