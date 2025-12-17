@@ -870,6 +870,92 @@ app.get('/warm-words', async (req, res) => {
     }
 });
 
+// REBT 轉念練習完成：更新分析記錄並新增聊天與心情日記紀錄
+app.post('/rebt/complete', async (req, res) => {
+    // 前端傳來的資料
+    const { id, username, event, belief, dispute, newBelief } = req.body;
+
+    if (!id || !username) {
+        return res.status(400).json({ success: false, message: '缺少必要參數' });
+    }
+
+    const clientConn = client;
+
+    try {
+        await clientConn.query('BEGIN'); // 開啟交易
+
+        // ---------------------------------------------------------
+        // 1. 更新 emotion_analysis 表 (讓當下的心智圖變綠色)
+        // ---------------------------------------------------------
+        const updateAnalysisQuery = `
+            UPDATE emotion_analysis 
+            SET is_resolved = true, 
+                current_stress = 30, 
+                user_dispute = $1,
+                new_belief = $2 
+            WHERE id = $3 AND username = $4
+            RETURNING *
+        `;
+        const analysisResult = await clientConn.query(updateAnalysisQuery, [dispute, newBelief, id, username]);
+
+        if (analysisResult.rows.length === 0) {
+            await clientConn.query('ROLLBACK');
+            return res.status(404).json({ success: false, message: '找不到該分析記錄' });
+        }
+
+        // ---------------------------------------------------------
+        // 2. 新增一筆紀錄到 chat_history
+        // ---------------------------------------------------------
+        const chatUserContent = `我完成了一個轉念練習。事件是「${event}」，原本想法是「${belief}」，但我反駁了它：「${dispute}」。我現在的新觀點是：「${newBelief}」。`;
+        const chatBotContent = `太棒了！能夠將「${belief}」轉化為「${newBelief}」，這顯示了你很好的自我覺察能力。`;
+
+        await clientConn.query(`
+            INSERT INTO chat_history (
+                username, user_message, bot_message, encourage_text, emotion, created_time,
+                is_rebt_log, rebt_event, rebt_old_belief, rebt_new_belief
+            ) VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7, $8, $9)
+        `, [
+            username, chatUserContent, chatBotContent, newBelief, '希望', true, event, belief, newBelief
+        ]);
+
+        // ---------------------------------------------------------
+        // 3. ★ 新增：同步新增一筆紀錄到 mood_history
+        // ---------------------------------------------------------
+        // 心情日記的內容可以比較像是使用者的「自我獨白」
+        const moodContent = `【轉念成功】\n針對「${event}」這件事，我發現我原本卡在「${belief}」的想法裡。\n經過思考後，我覺得：「${dispute}」。\n所以我決定用新的觀點來看待：「${newBelief}」。\n感覺心情輕鬆多了！`;
+
+        await clientConn.query(`
+            INSERT INTO mood_history (
+                username, content, mood, created_at,
+                is_rebt_log, rebt_event, rebt_old_belief, rebt_new_belief
+            ) VALUES ($1, $2, $3, NOW(), $4, $5, $6, $7)
+        `, [
+            username, 
+            moodContent, 
+            '希望',     // mood 設為正向情緒
+            true,      // is_rebt_log
+            event,     // rebt_event
+            belief,    // rebt_old_belief
+            newBelief  // rebt_new_belief
+        ]);
+
+        await clientConn.query('COMMIT'); // 提交交易
+
+        console.log(`[REBT] User ${username} resolved analysis ID ${id} (Saved to Analysis, Chat, and Mood).`);
+
+        res.json({ 
+            success: true, 
+            message: '療癒記錄已完整儲存',
+            record: analysisResult.rows[0]
+        });
+
+    } catch (err) {
+        await clientConn.query('ROLLBACK');
+        console.error('REBT complete error:', err.stack);
+        res.status(500).json({ success: false, message: '儲存失敗' });
+    }
+});
+
 // 壓力來源分析：使用 OpenAI 分析用戶的聊天與心情記錄
 app.post('/analyze-stress', async (req, res) => {
     const { username } = req.body;
@@ -1100,7 +1186,8 @@ app.get('/emotion-analysis', async (req, res) => {
 
         // 取得最新一次分析的所有記錄
         const result = await client.query(
-            `SELECT id, username, category, source, impact, emotion, note, created_at 
+            `SELECT id, username, category, source, impact, emotion, note, created_at,
+                    is_resolved, current_stress, new_belief, user_dispute 
              FROM emotion_analysis 
              WHERE username = $1 AND created_at = $2
              ORDER BY id ASC`,
