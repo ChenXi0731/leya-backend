@@ -1120,8 +1120,11 @@ ${moodSummary}
         for (const item of analysisResults) {
             try {
                 const result = await client.query(
-                    `INSERT INTO emotion_analysis (username, category, source, impact, emotion, note, created_at) 
-                     VALUES ($1, $2, $3, $4, $5, $6, $7) 
+                    `INSERT INTO emotion_analysis (
+                        username, category, source, impact, emotion, note, created_at, 
+                        is_resolved, current_stress
+                    ) 
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
                      RETURNING *`,
                     [
                         username,
@@ -1131,7 +1134,9 @@ ${moodSummary}
                         item.emotion || null,
                         item.note || null,
                         batchTimestamp,
+                        // 這是第 8 個參數
                         item.is_resolved === true ? true : false,
+                        // 這是第 9 個參數
                         item.current_stress || 100
                     ]
                 );
