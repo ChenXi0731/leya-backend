@@ -218,13 +218,13 @@ app.post('/login', async (req, res) => {
     } catch (err) {
         if (err.message === 'Login timeout') {
             console.error('Login timeout for:', usernameOrEmail);
-            return res.status(504).json({ 
-                message: '登入請求超時，資料庫連線可能繁忙，請稍後再試或使用訪客模式' 
+            return res.status(504).json({
+                message: '登入請求超時，資料庫連線可能繁忙，請稍後再試或使用訪客模式'
             });
         }
         console.error('Login query error', err.stack);
-        return res.status(500).json({ 
-            message: '伺服器錯誤，請稍後再試或使用訪客模式' 
+        return res.status(500).json({
+            message: '伺服器錯誤，請稍後再試或使用訪客模式'
         });
     }
 });
@@ -364,7 +364,7 @@ app.post('/chat', async (req, res) => {
 
         // 記憶鏈：取得聊天紀錄
         let historyMessages = [];
-        try{
+        try {
             const sql = 'SELECT user_message, bot_message, encourage_text, emotion FROM chat_history WHERE username = $1 ORDER BY created_time DESC LIMIT $2';
             const maxNum = 6;
 
@@ -388,7 +388,7 @@ app.post('/chat', async (req, res) => {
                 }
             });
 
-        }catch(dbErr){
+        } catch (dbErr) {
             console.error('讀取歷史紀錄失敗：', dbErr);
         }
 
@@ -488,10 +488,10 @@ app.post('/chat-history', async (req, res) => {
                         } else {
                             console.warn(`[ChatHistory] 未找到 emotion '${emotion}' 對應的背景圖片，通用圖片採用亦失敗`);
                         }
-                    } catch(commonErr) {
+                    } catch (commonErr) {
                         console.error(`[ChatHistory] 查詢 emotion_imageurl 表時出錯: ${commonErr.message}`, commonErr.stack);
                     }
-                    
+
                 }
             } catch (dbError) {
                 console.error(`[ChatHistory] 查詢 emotion_imageurl 表時出錯: ${dbError.message}`, dbError.stack);
@@ -510,7 +510,7 @@ app.post('/chat-history', async (req, res) => {
                     if (imageBuffer && imageBuffer.length > 0) {
                         console.log(`[ChatHistory] 準備上傳圖片到 GitHub for user: ${username}`);
                         githubImageUrl = await uploadToGithub(username, imageBuffer);
-                        
+
                         if (githubImageUrl) {
                             console.log(`[ChatHistory] GitHub 上傳完成，圖片 URL: ${githubImageUrl}`);
                         } else {
@@ -519,7 +519,7 @@ app.post('/chat-history', async (req, res) => {
                     } else {
                         console.warn(`[ChatHistory] imageBuffer 為空或無效，跳過 GitHub 上傳 for user: ${username}`);
                     }
-                    
+
                     // 5. 將 githubImageUrl 和 username 存到 user_chat_image 表
                     if (githubImageUrl) {
                         try {
@@ -551,8 +551,8 @@ app.post('/chat-history', async (req, res) => {
 
         // 無論圖片處理是否成功，都回傳聊天記錄儲存成功的訊息
         // 圖片生成是一個背景的、附加的過程
-        res.status(201).json({ 
-            success: true, 
+        res.status(201).json({
+            success: true,
             message: '聊天記錄已儲存。',
             // 可以考慮在這裡加一個提示，比如：'圖片正在生成中 (如果適用)' 
         });
@@ -691,11 +691,11 @@ app.get('/emotion-image/:emotion', async (req, res) => {
 // 一鍵清除聊天記錄 (僅限 shuics)
 app.delete('/chat-history/clear-all', async (req, res) => {
     const { username } = req.query;
-    
+
     if (!username || username !== 'shuics') {
-        return res.status(403).json({ 
-            success: false, 
-            message: '只有訪客模式可以使用清除功能' 
+        return res.status(403).json({
+            success: false,
+            message: '只有訪客模式可以使用清除功能'
         });
     }
 
@@ -705,7 +705,7 @@ app.delete('/chat-history/clear-all', async (req, res) => {
             'DELETE FROM chat_history WHERE username = $1',
             [username]
         );
-        
+
         // 刪除相關圖片記錄
         const imageResult = await client.query(
             'DELETE FROM user_chat_image WHERE username = $1',
@@ -714,17 +714,17 @@ app.delete('/chat-history/clear-all', async (req, res) => {
 
         console.log(`[ClearAll] 已清除 ${username} 的 ${chatResult.rowCount} 條聊天記錄和 ${imageResult.rowCount} 張圖片`);
 
-        res.json({ 
-            success: true, 
+        res.json({
+            success: true,
             message: '已清除所有聊天記錄',
             deletedChats: chatResult.rowCount,
             deletedImages: imageResult.rowCount
         });
     } catch (err) {
         console.error('Clear all chat history error:', err.stack);
-        res.status(500).json({ 
-            success: false, 
-            message: '清除失敗，請稍後再試' 
+        res.status(500).json({
+            success: false,
+            message: '清除失敗，請稍後再試'
         });
     }
 });
@@ -732,11 +732,11 @@ app.delete('/chat-history/clear-all', async (req, res) => {
 // 一鍵清除心情日記 (僅限 shuics)
 app.delete('/mood-journal/clear-all', async (req, res) => {
     const { username } = req.query;
-    
+
     if (!username || username !== 'shuics') {
-        return res.status(403).json({ 
-            success: false, 
-            message: '只有訪客模式可以使用清除功能' 
+        return res.status(403).json({
+            success: false,
+            message: '只有訪客模式可以使用清除功能'
         });
     }
 
@@ -748,16 +748,16 @@ app.delete('/mood-journal/clear-all', async (req, res) => {
 
         console.log(`[ClearAll] 已清除 ${username} 的 ${result.rowCount} 條心情日記`);
 
-        res.json({ 
-            success: true, 
+        res.json({
+            success: true,
             message: '已清除所有心情日記',
             deletedCount: result.rowCount
         });
     } catch (err) {
         console.error('Clear all mood journal error:', err.stack);
-        res.status(500).json({ 
-            success: false, 
-            message: '清除失敗，請稍後再試' 
+        res.status(500).json({
+            success: false,
+            message: '清除失敗，請稍後再試'
         });
     }
 });
@@ -930,8 +930,8 @@ app.post('/rebt/complete', async (req, res) => {
                 is_rebt_log, rebt_event, rebt_old_belief, rebt_new_belief
             ) VALUES ($1, $2, $3, NOW(), $4, $5, $6, $7)
         `, [
-            username, 
-            moodContent, 
+            username,
+            moodContent,
             '希望',     // mood 設為正向情緒
             true,      // is_rebt_log
             event,     // rebt_event
@@ -943,8 +943,8 @@ app.post('/rebt/complete', async (req, res) => {
 
         console.log(`[REBT] User ${username} resolved analysis ID ${id} (Saved to Analysis, Chat, and Mood).`);
 
-        res.json({ 
-            success: true, 
+        res.json({
+            success: true,
             message: '療癒記錄已完整儲存',
             record: analysisResult.rows[0]
         });
@@ -959,7 +959,7 @@ app.post('/rebt/complete', async (req, res) => {
 // 壓力來源分析：使用 OpenAI 分析用戶的聊天與心情記錄
 app.post('/analyze-stress', async (req, res) => {
     const { username } = req.body;
-    
+
     if (!username) {
         return res.status(400).json({ success: false, message: '缺少必要欄位：username' });
     }
@@ -995,18 +995,18 @@ app.post('/analyze-stress', async (req, res) => {
 
         // 檢查是否有足夠的數據進行分析
         if (chatHistory.length === 0 && moodHistory.length === 0) {
-            return res.status(404).json({ 
-                success: false, 
-                message: '該用戶沒有足夠的聊天或心情記錄可供分析' 
+            return res.status(404).json({
+                success: false,
+                message: '該用戶沒有足夠的聊天或心情記錄可供分析'
             });
         }
 
         // 3. 準備提示詞給 OpenAI
-        const chatSummary = chatHistory.map((chat, idx) => 
+        const chatSummary = chatHistory.map((chat, idx) =>
             `[${idx + 1}] 用戶: ${chat.user_message || '無'} | 情緒: ${chat.emotion || '無'}`
         ).join('\n');
 
-        const moodSummary = moodHistory.map((mood, idx) => 
+        const moodSummary = moodHistory.map((mood, idx) =>
             `[${idx + 1}] 心情: ${mood.mood || '無'} | 內容: ${mood.content || '無'}`
         ).join('\n');
 
@@ -1026,20 +1026,21 @@ ${moodSummary}
       "source": "期末考成績不理想", 
       "emotion": "焦慮",
       "impact": "失眠、暴飲暴食",
-      "note": "我必須科科拿滿分，否則就是個失敗者"
+      "note": "我必須科科拿滿分，否則就是個失敗者",
+      "is_resolved": false,
+      "current_stress": 100
     }
   ]
 }
 
 欄位填寫要求 (對應 REBT 模型)：
 1. category (分類)：使用繁體中文，如學業、人際、家庭、財務、健康、未來、自我價值。
-2. source (A - 促發事件)：客觀發生的事件 (Activating Event)。例如：「被主管批評」、「考試不及格」。
-3. emotion (C - 情緒後果)：感受到的情緒 (Consequences - Emotion)。例如：「焦慮」、「憤怒」、「無助」。
-4. impact (C - 行為/生理後果)：行為反應或生理影響 (Consequences - Behavior)。例如：「失眠」、「逃避社交」、「胃痛」。
-5. note (B - 信念)：【關鍵】請偵測使用者潛在的「非理性信念」(Beliefs)。
-   - 找出含有「必須」、「應該」、「一定」的絕對化要求。
-   - 或者是「災難化思考」(完蛋了)、「低挫折容忍度」(受不了了)。
-   - 範例：「如果不完美，我就沒價值」、「別人一定要對我好」。
+2. source (A - 促發事件)：客觀發生的事件。
+3. emotion (C - 情緒後果)：感受到的情緒。
+4. impact (C - 行為/生理後果)：行為反應或生理影響。
+5. note (B - 信念)：偵測使用者潛在的「非理性信念」。
+6. is_resolved (Boolean - 關鍵)：請仔細檢查對話紀錄，若使用者曾明確表示「已經解決」、「轉念成功」或有進行 REBT 練習且結果正向（例如：「我現在覺得好多了」、「我發現原本的想法不合理」），請填 true，否則填 false。
+7. current_stress (Int)：若 is_resolved 為 true，請填 30；若為 false，請填 100。
 
 整體要求：
 1. 回傳包含 analysis 陣列的 JSON 物件。
@@ -1056,9 +1057,9 @@ ${moodSummary}
             body: JSON.stringify({
                 model: 'gpt-4o-mini',
                 messages: [
-                    { 
-                        role: 'system', 
-                        content: 'You are a professional mental health analyst. Always respond with valid JSON array only. Do not use markdown code blocks or any other formatting. Response must start with [ and end with ].' 
+                    {
+                        role: 'system',
+                        content: 'You are a professional mental health analyst. Always respond with valid JSON array only. Do not use markdown code blocks or any other formatting. Response must start with [ and end with ].'
                     },
                     { role: 'user', content: prompt }
                 ],
@@ -1076,14 +1077,14 @@ ${moodSummary}
 
         const data = await resp.json();
         let content = data?.choices?.[0]?.message?.content || '';
-        
+
         // 清理 OpenAI 回應：移除 markdown 代碼塊標記
         content = content.trim();
         // 移除 ```json 開頭和 ``` 結尾
         content = content.replace(/^```json\s*/i, '').replace(/^```\s*/i, '');
         content = content.replace(/\s*```$/i, '');
         content = content.trim();
-        
+
         let analysisResults = [];
         try {
             // 嘗試解析 JSON
@@ -1091,7 +1092,7 @@ ${moodSummary}
             // 如果回傳的是物件且包含 analysis 陣列
             if (parsed.analysis && Array.isArray(parsed.analysis)) {
                 analysisResults = parsed.analysis;
-            } 
+            }
             // 如果回傳的直接是陣列
             else if (Array.isArray(parsed)) {
                 analysisResults = parsed;
@@ -1104,8 +1105,8 @@ ${moodSummary}
             console.error('JSON parse error:', e);
             console.error('Original content:', data?.choices?.[0]?.message?.content);
             console.error('Cleaned content:', content);
-            return res.status(500).json({ 
-                success: false, 
+            return res.status(500).json({
+                success: false,
                 message: 'AI 回應格式錯誤，無法解析分析結果',
                 debug: process.env.NODE_ENV === 'development' ? content : undefined
             });
@@ -1115,7 +1116,7 @@ ${moodSummary}
         const insertedRecords = [];
         // 記錄當前批次的時間戳，用於標識這次分析
         const batchTimestamp = new Date();
-        
+
         for (const item of analysisResults) {
             try {
                 const result = await client.query(
@@ -1129,7 +1130,9 @@ ${moodSummary}
                         item.impact || null,
                         item.emotion || null,
                         item.note || null,
-                        batchTimestamp
+                        batchTimestamp,
+                        item.is_resolved === true ? true : false,
+                        item.current_stress || 100
                     ]
                 );
                 insertedRecords.push(result.rows[0]);
@@ -1140,8 +1143,8 @@ ${moodSummary}
 
         console.log(`[StressAnalysis] 已為用戶 ${username} 儲存 ${insertedRecords.length} 條新分析記錄`);
 
-        return res.json({ 
-            success: true, 
+        return res.json({
+            success: true,
             message: `成功分析並儲存 ${insertedRecords.length} 條壓力來源記錄`,
             records: insertedRecords,
             count: insertedRecords.length
@@ -1149,9 +1152,9 @@ ${moodSummary}
 
     } catch (err) {
         console.error('Analyze stress error:', err.stack);
-        return res.status(500).json({ 
-            success: false, 
-            message: '伺服器錯誤，壓力來源分析失敗' 
+        return res.status(500).json({
+            success: false,
+            message: '伺服器錯誤，壓力來源分析失敗'
         });
     }
 });
@@ -1159,7 +1162,7 @@ ${moodSummary}
 // 取得用戶的壓力來源分析記錄（只返回最新一次的分析）
 app.get('/emotion-analysis', async (req, res) => {
     const { username } = req.query;
-    
+
     if (!username) {
         return res.status(400).json({ success: false, message: '缺少 username 參數' });
     }
@@ -1177,8 +1180,8 @@ app.get('/emotion-analysis', async (req, res) => {
 
         if (!latestTime) {
             // 如果沒有任何記錄
-            return res.json({ 
-                success: true, 
+            return res.json({
+                success: true,
                 records: [],
                 count: 0
             });
@@ -1194,17 +1197,17 @@ app.get('/emotion-analysis', async (req, res) => {
             [username, latestTime]
         );
 
-        return res.json({ 
-            success: true, 
+        return res.json({
+            success: true,
             records: result.rows,
             count: result.rows.length,
             analysisDate: latestTime
         });
     } catch (err) {
         console.error('Fetch emotion analysis error:', err.stack);
-        return res.status(500).json({ 
-            success: false, 
-            message: '伺服器錯誤，無法取得壓力來源分析記錄' 
+        return res.status(500).json({
+            success: false,
+            message: '伺服器錯誤，無法取得壓力來源分析記錄'
         });
     }
 });
@@ -1212,7 +1215,7 @@ app.get('/emotion-analysis', async (req, res) => {
 // 取得用戶的所有歷史壓力分析記錄（按時間分組）
 app.get('/emotion-analysis/history', async (req, res) => {
     const { username } = req.query;
-    
+
     if (!username) {
         return res.status(400).json({ success: false, message: '缺少 username 參數' });
     }
@@ -1247,16 +1250,16 @@ app.get('/emotion-analysis/history', async (req, res) => {
             });
         }
 
-        return res.json({ 
-            success: true, 
+        return res.json({
+            success: true,
             history: historyData,
             totalAnalyses: historyData.length
         });
     } catch (err) {
         console.error('Fetch emotion analysis history error:', err.stack);
-        return res.status(500).json({ 
-            success: false, 
-            message: '伺服器錯誤，無法取得壓力分析歷史記錄' 
+        return res.status(500).json({
+            success: false,
+            message: '伺服器錯誤，無法取得壓力分析歷史記錄'
         });
     }
 });
@@ -1306,22 +1309,22 @@ app.delete('/emotion-analysis/:id', async (req, res) => {
         );
 
         if (result.rows.length === 0) {
-            return res.status(404).json({ 
-                success: false, 
-                message: '找不到該記錄或無權限刪除' 
+            return res.status(404).json({
+                success: false,
+                message: '找不到該記錄或無權限刪除'
             });
         }
 
-        return res.json({ 
-            success: true, 
+        return res.json({
+            success: true,
             message: '刪除成功',
             record: result.rows[0]
         });
     } catch (err) {
         console.error('Delete emotion analysis error:', err.stack);
-        return res.status(500).json({ 
-            success: false, 
-            message: '伺服器錯誤，無法刪除記錄' 
+        return res.status(500).json({
+            success: false,
+            message: '伺服器錯誤，無法刪除記錄'
         });
     }
 });
@@ -1333,9 +1336,9 @@ app.post('/forgot-password', async (req, res) => {
     const { email } = req.body;
 
     if (!email) {
-        return res.status(400).json({ 
-            success: false, 
-            message: '請提供電子郵件地址' 
+        return res.status(400).json({
+            success: false,
+            message: '請提供電子郵件地址'
         });
     }
 
@@ -1346,9 +1349,9 @@ app.post('/forgot-password', async (req, res) => {
 
         if (checkResult.rows.length === 0) {
             // 為了安全性，即使郵件不存在也返回成功訊息（防止郵件探測）
-            return res.json({ 
-                success: true, 
-                message: '如果該電子郵件存在於我們的系統中，您將收到重設密碼的連結' 
+            return res.json({
+                success: true,
+                message: '如果該電子郵件存在於我們的系統中，您將收到重設密碼的連結'
             });
         }
 
@@ -1428,16 +1431,16 @@ app.post('/forgot-password', async (req, res) => {
         // 發送郵件
         await transporter.sendMail(mailOptions);
 
-        res.json({ 
-            success: true, 
-            message: '重設密碼連結已發送到您的信箱，請檢查您的郵件' 
+        res.json({
+            success: true,
+            message: '重設密碼連結已發送到您的信箱，請檢查您的郵件'
         });
 
     } catch (err) {
         console.error('Forgot password error:', err);
-        res.status(500).json({ 
-            success: false, 
-            message: '發送重設連結時發生錯誤，請稍後再試' 
+        res.status(500).json({
+            success: false,
+            message: '發送重設連結時發生錯誤，請稍後再試'
         });
     }
 });
@@ -1447,10 +1450,10 @@ app.get('/validate-reset-token', async (req, res) => {
     const { token } = req.query;
 
     if (!token) {
-        return res.status(400).json({ 
-            success: false, 
+        return res.status(400).json({
+            success: false,
             valid: false,
-            message: '缺少 token' 
+            message: '缺少 token'
         });
     }
 
@@ -1463,10 +1466,10 @@ app.get('/validate-reset-token', async (req, res) => {
         const result = await client.query(query, [token]);
 
         if (result.rows.length === 0) {
-            return res.json({ 
-                success: false, 
+            return res.json({
+                success: false,
                 valid: false,
-                message: '無效的重設連結' 
+                message: '無效的重設連結'
             });
         }
 
@@ -1474,25 +1477,25 @@ app.get('/validate-reset-token', async (req, res) => {
         const now = new Date();
 
         if (user.reset_token_expiry < now) {
-            return res.json({ 
-                success: false, 
+            return res.json({
+                success: false,
                 valid: false,
-                message: '重設連結已過期' 
+                message: '重設連結已過期'
             });
         }
 
-        res.json({ 
-            success: true, 
+        res.json({
+            success: true,
             valid: true,
-            message: 'Token 有效' 
+            message: 'Token 有效'
         });
 
     } catch (err) {
         console.error('Validate token error:', err);
-        res.status(500).json({ 
-            success: false, 
+        res.status(500).json({
+            success: false,
             valid: false,
-            message: '驗證 token 時發生錯誤' 
+            message: '驗證 token 時發生錯誤'
         });
     }
 });
@@ -1502,16 +1505,16 @@ app.post('/reset-password', async (req, res) => {
     const { token, newPassword } = req.body;
 
     if (!token || !newPassword) {
-        return res.status(400).json({ 
-            success: false, 
-            message: '缺少必要參數' 
+        return res.status(400).json({
+            success: false,
+            message: '缺少必要參數'
         });
     }
 
     if (newPassword.length < 6) {
-        return res.status(400).json({ 
-            success: false, 
-            message: '密碼長度至少需要 6 個字元' 
+        return res.status(400).json({
+            success: false,
+            message: '密碼長度至少需要 6 個字元'
         });
     }
 
@@ -1525,9 +1528,9 @@ app.post('/reset-password', async (req, res) => {
         const checkResult = await client.query(checkQuery, [token]);
 
         if (checkResult.rows.length === 0) {
-            return res.status(400).json({ 
-                success: false, 
-                message: '無效的重設連結' 
+            return res.status(400).json({
+                success: false,
+                message: '無效的重設連結'
             });
         }
 
@@ -1535,9 +1538,9 @@ app.post('/reset-password', async (req, res) => {
         const now = new Date();
 
         if (user.reset_token_expiry < now) {
-            return res.status(400).json({ 
-                success: false, 
-                message: '重設連結已過期，請重新申請' 
+            return res.status(400).json({
+                success: false,
+                message: '重設連結已過期，請重新申請'
             });
         }
 
@@ -1549,16 +1552,16 @@ app.post('/reset-password', async (req, res) => {
         `;
         await client.query(updateQuery, [newPassword, user.id]);
 
-        res.json({ 
-            success: true, 
-            message: '密碼重設成功' 
+        res.json({
+            success: true,
+            message: '密碼重設成功'
         });
 
     } catch (err) {
         console.error('Reset password error:', err);
-        res.status(500).json({ 
-            success: false, 
-            message: '重設密碼時發生錯誤' 
+        res.status(500).json({
+            success: false,
+            message: '重設密碼時發生錯誤'
         });
     }
 });
