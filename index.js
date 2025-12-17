@@ -924,7 +924,7 @@ app.post('/analyze-stress', async (req, res) => {
             `[${idx + 1}] 心情: ${mood.mood || '無'} | 內容: ${mood.content || '無'}`
         ).join('\n');
 
-        const prompt = `你是一位專業的心理健康分析師。請根據以下用戶的聊天記錄和心情日記，分析其壓力來源。
+        const prompt = `你是一位精通 REBT (理性情緒行為治療) 的心理諮詢專家。請根據以下用戶的聊天記錄和心情日記，分析其壓力來源，並依照 ABC 模型進行拆解。
 
 聊天記錄：
 ${chatSummary}
@@ -932,25 +932,33 @@ ${chatSummary}
 心情日記：
 ${moodSummary}
 
-請分析壓力來源並回傳 JSON 物件，格式範例：
+請分析並回傳 JSON 物件，格式範例：
 {
   "analysis": [
     {
       "category": "學業",
-      "source": "考試壓力",
-      "impact": "睡眠",
+      "source": "期末考成績不理想", 
       "emotion": "焦慮",
-      "note": "期末考臨近，準備不足導致睡眠品質下降"
+      "impact": "失眠、暴飲暴食",
+      "note": "我必須科科拿滿分，否則就是個失敗者"
     }
   ]
 }
 
-要求：
-1. 回傳包含 analysis 陣列的 JSON 物件
-2. 根據實際記錄內容分析，回傳 3-8 條記錄
-3. category 使用繁體中文：學業、人際、家庭、財務、健康、未來等
-4. 每條記錄必須有明確依據
-5. note 欄位 20-40 字具體描述`;
+欄位填寫要求 (對應 REBT 模型)：
+1. category (分類)：使用繁體中文，如學業、人際、家庭、財務、健康、未來、自我價值。
+2. source (A - 促發事件)：客觀發生的事件 (Activating Event)。例如：「被主管批評」、「考試不及格」。
+3. emotion (C - 情緒後果)：感受到的情緒 (Consequences - Emotion)。例如：「焦慮」、「憤怒」、「無助」。
+4. impact (C - 行為/生理後果)：行為反應或生理影響 (Consequences - Behavior)。例如：「失眠」、「逃避社交」、「胃痛」。
+5. note (B - 信念)：【關鍵】請偵測使用者潛在的「非理性信念」(Beliefs)。
+   - 找出含有「必須」、「應該」、「一定」的絕對化要求。
+   - 或者是「災難化思考」(完蛋了)、「低挫折容忍度」(受不了了)。
+   - 範例：「如果不完美，我就沒價值」、「別人一定要對我好」。
+
+整體要求：
+1. 回傳包含 analysis 陣列的 JSON 物件。
+2. 根據實際記錄內容分析，回傳 3-8 條記錄。
+3. 若沒有明顯的非理性信念，note 欄位可描述使用者對該事件的解讀。`;
 
         // 4. 呼叫 OpenAI API
         const resp = await fetch('https://api.openai.com/v1/chat/completions', {
